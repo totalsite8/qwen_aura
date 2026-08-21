@@ -1,11 +1,25 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Check, Gift, Layers, Search, ShoppingBag, Wrench, type LucideIcon } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Check,
+  Gift,
+  Layers,
+  Radar,
+  Search,
+  ShieldCheck,
+  ShoppingBag,
+  Truck,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { usePwaStore } from "../features/pwa/pwaStore";
 import { spring, springTight } from "../lib/motion";
 import { getSuggestions } from "../lib/classify";
+import { fmtNum } from "../lib/utils";
 import type { QueryType, Suggestion } from "../types";
 import { Orb } from "./Orb";
 import { TypeBadge } from "./ui";
@@ -23,6 +37,120 @@ const TYPE_ICON: Record<QueryType, LucideIcon> = {
   gift_search: Gift,
   service_search: Wrench,
 };
+
+/* ─────────── Фразы сомнения, которые витают при любом поиске ─────────── */
+const DOUBTS: {
+  t: string;
+  x: string;
+  y: string;
+  tilt: number;
+  dur: number;
+  delay: number;
+  size: number;
+  mobile?: boolean;
+}[] = [
+  { t: "как найти лучшую цену?", x: "5%", y: "11%", tilt: -3, dur: 9, delay: 0, size: 13, mobile: true },
+  { t: "а если это не оригинал?", x: "64%", y: "7%", tilt: 2, dur: 11, delay: -3, size: 14, mobile: true },
+  { t: "вдруг отзывы ненастоящие?", x: "76%", y: "28%", tilt: -2, dur: 10, delay: -5, size: 12.5 },
+  { t: "не переплачиваю ли я?", x: "6%", y: "36%", tilt: 2, dur: 12, delay: -2, size: 12.5, mobile: true },
+  { t: "доставка не затянется?", x: "80%", y: "52%", tilt: -3, dur: 9.5, delay: -6, size: 12 },
+  { t: "а если сломается через месяц?", x: "3%", y: "58%", tilt: 1.5, dur: 10.5, delay: -4, size: 12 },
+  { t: "продавцу можно доверять?", x: "68%", y: "74%", tilt: 2, dur: 11.5, delay: -1, size: 13, mobile: true },
+  { t: "гарантия точно есть?", x: "10%", y: "79%", tilt: -2, dur: 9, delay: -7, size: 12, mobile: true },
+  { t: "почему там дешевле?", x: "38%", y: "89%", tilt: 1, dur: 10, delay: -3.5, size: 11.5 },
+  { t: "это цена без подвоха?", x: "36%", y: "3%", tilt: -1.5, dur: 12.5, delay: -8, size: 12 },
+];
+
+function DoubtField() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+      style={{
+        maskImage: "radial-gradient(ellipse 62% 48% at 50% 40%, transparent 26%, black 78%)",
+        WebkitMaskImage: "radial-gradient(ellipse 62% 48% at 50% 40%, transparent 26%, black 78%)",
+      }}
+    >
+      {DOUBTS.map((d) => (
+        <span
+          key={d.t}
+          className={`doubt rounded-full border border-line bg-card/60 px-3 py-1.5 font-mono text-faint backdrop-blur-[3px] ${
+            d.mobile ? "" : "hidden sm:inline-block"
+          }`}
+          style={{
+            left: d.x,
+            top: d.y,
+            fontSize: d.size,
+            ["--dur" as string]: `${d.dur}s`,
+            ["--delay" as string]: `${d.delay}s`,
+            ["--tilt" as string]: `${d.tilt}deg`,
+            opacity: 0.75,
+          }}
+        >
+          {d.t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/* ─────────── Пульт команды: кто работает над каждым поиском ─────────── */
+const TEAM: { icon: LucideIcon; role: string; desc: string; base: number; unit: string; tick: number }[] = [
+  { icon: Radar, role: "Искатель цен", desc: "сравнивает цены во всех магазинах сети", base: 2340, unit: "цен под наблюдением", tick: 7 },
+  { icon: ShieldCheck, role: "Ревизор подлинности", desc: "проверяет продавцов и товары на честность", base: 412, unit: "проверок сегодня", tick: 3 },
+  { icon: BookOpen, role: "Исследователь отзывов", desc: "читает отзывы и обзоры — вместо вас", base: 18430, unit: "отзывов проанализировано", tick: 12 },
+  { icon: Truck, role: "Аналитик условий", desc: "сверяет доставку, возврат и гарантию", base: 96, unit: "магазинов на связи", tick: 1 },
+];
+
+function TeamConsole() {
+  const [vals, setVals] = useState(() => TEAM.map((t) => t.base));
+  useEffect(() => {
+    const iv = window.setInterval(
+      () => setVals((v) => v.map((x, i) => x + Math.floor(Math.random() * TEAM[i].tick) + 1)),
+      3600
+    );
+    return () => window.clearInterval(iv);
+  }, []);
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 22 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...spring, delay: 0.25 }}
+      className="glass relative z-10 mt-12 w-full max-w-3xl overflow-hidden rounded-3xl"
+      aria-label="Команда Aura"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-line/70 px-5 py-3">
+        <p className="label-caps">За каждым поиском — целая команда</p>
+        <span className="inline-flex items-center gap-2 text-[12px] font-semibold text-pine">
+          <span className="live-dot" />
+          все на связи
+        </span>
+      </div>
+      <ul className="divide-y divide-line/70">
+        {TEAM.map((t, i) => (
+          <li key={t.role} className="flex items-center gap-3.5 px-5 py-3.5">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-pine/10 text-pine">
+              <t.icon size={16} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-bold leading-tight">{t.role}</p>
+              <p className="truncate text-[12px] text-soft">{t.desc}</p>
+            </div>
+            <div className="shrink-0 text-right">
+              <motion.p key={vals[i]} initial={{ opacity: 0.35, y: 3 }} animate={{ opacity: 1, y: 0 }} className="font-mono text-[15px] font-bold leading-none">
+                {fmtNum(vals[i])}
+              </motion.p>
+              <p className="mt-0.5 text-[10.5px] uppercase tracking-wide text-faint">{t.unit}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-line/70 px-5 py-3 text-center text-[12.5px] text-soft">
+        Вы спрашиваете одной фразой — команда находит лучшее предложение в сети. Поиск всегда бесплатный.
+      </p>
+    </motion.section>
+  );
+}
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -83,8 +211,9 @@ export function HomePage() {
   };
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center px-4 pb-14 pt-8">
-      <div className="flex w-full flex-col items-center gap-10 md:flex-row md:justify-center md:gap-16">
+    <main className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center px-4 pb-14 pt-8">
+      <DoubtField />
+      <div className="relative z-10 flex w-full flex-col items-center gap-10 md:flex-row md:justify-center md:gap-16">
         {/* Сфера Aura */}
         <motion.div
           initial={{ opacity: 0, scale: 0.85 }}
@@ -112,6 +241,10 @@ export function HomePage() {
               </motion.span>
             </span>
           </h1>
+          <p className="mt-3 max-w-md text-[14px] leading-relaxed text-soft">
+            Исследователи, ревизоры и аналитики Aura подключены и уже ищут лучшее предложение в сети.
+            Вам достаточно одной фразы.
+          </p>
 
           <form
             className="relative mt-6"
@@ -211,7 +344,9 @@ export function HomePage() {
         </div>
       </div>
 
-      <p className="mt-16 text-center text-[12px] text-faint">
+      <TeamConsole />
+
+      <p className="relative z-10 mt-10 text-center text-[12px] text-faint">
         Демо-прототип Aura · товары, категории, подарки и услуги
       </p>
     </main>

@@ -242,6 +242,45 @@ export function PriceGauge({ price, avg }: { price: number; avg: number }) {
   );
 }
 
+/* ─────────── Всплывающая подсказка простым языком ─────────── */
+export function Tip({ text, side = "top" }: { text: string; side?: "top" | "bottom" }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        aria-label="Пояснение"
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        className="grid h-4.5 w-4.5 place-items-center rounded-full text-faint transition-colors hover:text-pine focus:outline-none focus-visible:ring-2 focus-visible:ring-pine/50"
+        style={{ width: 18, height: 18 }}
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+          <circle cx="8" cy="8" r="6.4" />
+          <path d="M8 7.4v3.4" />
+          <circle cx="8" cy="5" r="0.5" fill="currentColor" stroke="none" />
+        </svg>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.span
+            role="tooltip"
+            initial={{ opacity: 0, y: side === "top" ? 6 : -6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: side === "top" ? 4 : -4, scale: 0.98 }}
+            transition={{ type: "spring", stiffness: 260, damping: 22 }}
+            className={`glass pointer-events-none absolute left-1/2 z-50 w-56 -translate-x-1/2 rounded-xl px-3.5 py-2.5 text-left text-[12px] font-normal leading-snug text-ink shadow-xl ${
+              side === "top" ? "bottom-full mb-2" : "top-full mt-2"
+            }`}
+          >
+            {text}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </span>
+  );
+}
+
 /* ─────────── Заголовок с line-mask reveal ─────────── */
 export function MaskTitle({ text, className = "" }: { text: string; className?: string }) {
   return (

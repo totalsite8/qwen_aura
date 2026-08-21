@@ -18,7 +18,7 @@ import { fadeUp, spring, stagger } from "../lib/motion";
 import { fmtMoney, fmtNum, plural } from "../lib/utils";
 import type { Product } from "../types";
 import { ProductArt } from "./ProductArt";
-import { AuraBadge, Modal, PointsChip, ScoreRing, PriceGauge, Stars } from "./ui";
+import { AuraBadge, Modal, PointsChip, PriceGauge, ScoreRing, Stars, Tip } from "./ui";
 
 /* ─────────── Главная плитка «Выбор Aura» ─────────── */
 export function ChoiceTile({ product, onBuy }: { product: Product; onBuy: (mode: "points" | "plain") => void }) {
@@ -109,7 +109,10 @@ export function HonestTile({ product, minOther }: { product: Product; minOther?:
   const diff = cheaperExists ? product.price - (minOther ?? 0) : 0;
   return (
     <motion.div variants={fadeUp} className="tile tile-static flex flex-col p-5">
-      <p className="label-caps mb-3">Честный расчёт</p>
+      <p className="label-caps mb-3 flex items-center gap-1.5">
+        Честный расчёт
+        <Tip text="Цена показана как в магазине, без хитростей. Баллы — бесплатный бонус поверх цены, они её не уменьшают." />
+      </p>
       <dl className="space-y-2 text-[14px]">
         <div className="flex justify-between gap-3">
           <dt className="text-soft">Цена в «{product.seller}»</dt>
@@ -147,7 +150,10 @@ export function ReliabilityTile({ product }: { product: Product }) {
   const checks = all ? product.reliabilityChecks : product.reliabilityChecks.slice(0, 3);
   return (
     <motion.div variants={fadeUp} className="tile tile-static flex flex-col p-5">
-      <p className="label-caps mb-3">Проверка надёжности</p>
+      <p className="label-caps mb-3 flex items-center gap-1.5">
+        Проверка надёжности
+        <Tip text="Оценка из 10: рейтинг продавца, реальные отзывы, гарантия, цена и история магазина. Всё, чтобы вы не сомневались." />
+      </p>
       <div className="flex items-center gap-4">
         <ScoreRing score={product.score} size={86} />
         <div className="min-w-0 flex-1 space-y-1.5">
@@ -249,7 +255,10 @@ export function HistoryTile({ product }: { product: Product }) {
   return (
     <motion.div variants={fadeUp} className="tile tile-static flex flex-col p-5">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="label-caps">Динамика цены · 90 дней</p>
+        <p className="label-caps flex items-center gap-1.5">
+          Динамика цены · 90 дней
+          <Tip text="«Дно» — самая низкая цена за 3 месяца. Если сейчас рядом с дном — момент хороший, можно не ждать." />
+        </p>
         <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${good ? "bg-pine/12 text-pine" : "bg-warn/12 text-warn"}`}>
           {good ? "Хороший момент" : "Можно подождать"}
         </span>

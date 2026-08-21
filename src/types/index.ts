@@ -30,15 +30,28 @@ export interface FeedItem {
   count?: number;
   /** для link: адреса, которые Aura «открывает» */
   urls?: string[];
+  /** пометить строку сравнения как победителя */
+  best?: boolean;
 }
 
-export interface ProcessStep {
+/** Один специалист команды Aura — работает параллельно с остальными */
+export interface Lane {
   id: string;
+  role: string;
   icon: LucideIcon;
-  text: string;
-  /** длительность в мс при обычной скорости */
-  duration: number;
   feeds: FeedItem[];
+  /** длительность работы в мс (базовая) */
+  duration: number;
+  /** задержка старта в мс */
+  offset: number;
+  /** короткий итог после завершения дорожки */
+  result: string;
+}
+
+export interface ProcessPlan {
+  lanes: Lane[];
+  /** общее время работы команды в мс */
+  total: number;
 }
 
 export interface Product {
@@ -103,7 +116,7 @@ export interface Scenario {
   type: QueryType;
   label: string;
   questions: ClarifyQuestion[];
-  process: ProcessStep[];
+  plan: ProcessPlan;
   products: Product[];
   giftDirections: GiftDirection[];
   taskSummary: { label: string; value: string }[];

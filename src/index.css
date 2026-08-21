@@ -228,6 +228,33 @@ body {
 .line-mask { overflow: hidden; display: block; }
 .line-mask > span { display: block; }
 
+/* ---------- витание фраз сомнения ---------- */
+@keyframes aura-drift {
+  0% { transform: translate3d(-16px, 6px, 0) rotate(var(--tilt, 0deg)); }
+  100% { transform: translate3d(16px, -8px, 0) rotate(var(--tilt, 0deg)); }
+}
+.doubt {
+  position: absolute;
+  animation: aura-drift var(--dur, 9s) ease-in-out infinite alternate;
+  animation-delay: var(--delay, 0s);
+  will-change: transform;
+}
+@keyframes aura-blink-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--pine) 50%, transparent); }
+  50% { opacity: 0.55; box-shadow: 0 0 0 5px transparent; }
+}
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--pine);
+  animation: aura-blink-dot 2.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .doubt { animation: none !important; }
+  .live-dot { animation: none !important; }
+}
+
 /* ---------- технологичная сетка «терминала» ---------- */
 .bg-grid {
   background-image:

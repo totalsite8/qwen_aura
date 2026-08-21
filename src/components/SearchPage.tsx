@@ -9,6 +9,7 @@ import {
   Info,
   Link2,
   ListChecks,
+  Loader2,
   MapPin,
   MessageSquare,
   Package,
@@ -107,9 +108,9 @@ function SectionNav({ ids }: { ids: { id: string; label: string }[] }) {
   );
 }
 
-/* ─────────── Итог поиска: что я сделала ─────────── */
+/* ─────────── Итог поиска: что сделала команда ─────────── */
 function SummaryStrip({ scenario, onShowProcess }: { scenario: Scenario; onShowProcess: () => void }) {
-  const s = computeStats(scenario.process);
+  const s = computeStats(scenario.plan);
   const isService = scenario.type === "service_search";
   const cells = [
     { icon: Store, v: s.markets, label: isService ? "компаний" : "магазинов" },
@@ -121,7 +122,7 @@ function SummaryStrip({ scenario, onShowProcess }: { scenario: Scenario; onShowP
   return (
     <motion.section variants={fadeUp} id="itog" className="tile tile-static scroll-mt-44 overflow-hidden">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4">
-        <p className="label-caps">Что я сделала</p>
+        <p className="label-caps">Что сделала команда</p>
         <div className="flex flex-1 flex-wrap items-center gap-x-6 gap-y-2">
           {cells.map((c) => (
             <span key={c.label} className="inline-flex items-center gap-2">
@@ -132,8 +133,22 @@ function SummaryStrip({ scenario, onShowProcess }: { scenario: Scenario; onShowP
           ))}
         </div>
         <button className="btn btn-ghost !px-3.5 !py-1.5 text-[12.5px]" onClick={onShowProcess}>
-          Как я это сделала
+          Как мы это сделали
         </button>
+      </div>
+      <div className="nice-scroll flex gap-2 overflow-x-auto border-t border-line px-5 py-3">
+        {scenario.plan.lanes.map((l) => (
+          <span
+            key={l.id}
+            className="inline-flex shrink-0 items-center gap-2 rounded-full border border-line bg-bg2/60 px-3 py-1.5 text-[12px] font-medium text-soft"
+            title={l.result}
+          >
+            <l.icon size={13} className="text-pine" />
+            {l.role}
+            <span className="text-faint">·</span>
+            <span className="max-w-[240px] truncate text-ink">{l.result}</span>
+          </span>
+        ))}
       </div>
     </motion.section>
   );
@@ -279,7 +294,10 @@ function SearchFlow({ query }: { query: string }) {
     scenario && scenario.questions.length > 0 ? "clarify" : "working"
   );
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [activeStep, setActiveStep] = useState(0);
+  const [stepIdx, setStepIdx] = useState(0);
+  const [wizardDir, setWizardDir] = useState(1);
+  const [launching, setLaunching] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [buy, setBuy] = useState<{ p: Product; mode: "points" | "plain" } | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -291,39 +309,71 @@ function SearchFlow({ query }: { query: string }) {
   const started = useRef(false);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
+  // масштабированный план: ?fast=1 ускоряет команду
+  const scaledPlan = useMemo(
+    () =>
+      scenario
+        ? {
+            lanes: scenario.plan.lanes.map((l) => ({
+              ...l,
+              offset: speed(l.offset),
+              duration: speed(l.duration),
+            })),
+            total: speed(scenario.plan.total),
+          }
+        : { lanes: [], total: 0 },
+    [scenario]
+  );
+
   const startProcess = useCallback(() => {
     if (!scenario || started.current) return;
     started.current = true;
     setPhase("working");
     setCollapsed(false);
-    setActiveStep(0);
-    let acc = 420;
-    scenario.process.forEach((step, i) => {
-      timers.current.push(window.setTimeout(() => setActiveStep(i), speed(acc)));
-      acc += step.duration;
-    });
-    timers.current.push(window.setTimeout(() => setActiveStep(scenario.process.length), speed(acc)));
-    timers.current.push(
-      window.setTimeout(() => {
-        setPhase("done");
-        setCollapsed(true); // процесс схлопывается к итогу
-      }, speed(acc + 750))
-    );
+    setElapsed(0);
   }, [scenario]);
+
+  // тик времени, пока команда работает
+  useEffect(() => {
+    if (phase !== "working") return;
+    const t0 = performance.now();
+    const iv = window.setInterval(() => setElapsed(performance.now() - t0), 100);
+    return () => window.clearInterval(iv);
+  }, [phase]);
+
+  // команда закончила — схлопываем процесс к итогу
+  useEffect(() => {
+    if (phase === "working" && scaledPlan.total > 0 && elapsed >= scaledPlan.total + 500) {
+      setPhase("done");
+      setCollapsed(true);
+    }
+  }, [phase, elapsed, scaledPlan.total]);
 
   useEffect(() => {
     if (scenario && scenario.questions.length === 0) startProcess();
   }, [scenario, startProcess]);
 
-  const answer = (qid: string, oid: string) => {
-    if (!scenario) return;
-    setAnswers((a) => {
-      const na = { ...a, [qid]: oid };
-      if (scenario.questions.every((q) => na[q.id]) && !started.current) {
-        timers.current.push(window.setTimeout(() => startProcess(), speed(650)));
-      }
-      return na;
-    });
+  const totalQ = scenario?.questions.length ?? 0;
+
+  const pick = (qid: string, oid: string) => {
+    if (!scenario || launching) return;
+    setAnswers((a) => ({ ...a, [qid]: oid }));
+    const isLast = stepIdx === totalQ - 1;
+    if (isLast) {
+      setLaunching(true);
+      timers.current.push(window.setTimeout(() => startProcess(), speed(900)));
+    } else {
+      setWizardDir(1);
+      timers.current.push(
+        window.setTimeout(() => setStepIdx((s) => Math.min(s + 1, totalQ - 1)), speed(420))
+      );
+    }
+  };
+
+  const goStep = (idx: number) => {
+    if (launching) return;
+    setWizardDir(idx >= stepIdx ? 1 : -1);
+    setStepIdx(idx);
   };
 
   /* ── fallback ── */
@@ -356,7 +406,6 @@ function SearchFlow({ query }: { query: string }) {
   const chosenProduct = scenario.products.find((p) => p.isAuraChoice) ?? scenario.products[0];
   const otherProducts = scenario.products.filter((p) => !p.isAuraChoice);
   const minOther = otherProducts.length ? Math.min(...otherProducts.map((p) => p.price)) : undefined;
-  const firstUnanswered = scenario.questions.findIndex((q) => !answers[q.id]);
 
   const navIds =
     scenario.type === "service_search"
@@ -386,44 +435,134 @@ function SearchFlow({ query }: { query: string }) {
       </header>
 
       <AnimatePresence mode="wait">
-        {/* ── УТОЧНЕНИЕ ── */}
+        {/* ── УТОЧНЕНИЕ: пошаговый мастер ── */}
         {phase === "clarify" && (
-          <motion.section key="clarify" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -12 }} className="mx-auto max-w-3xl space-y-4">
+          <motion.section key="clarify" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -12 }} className="mx-auto max-w-2xl space-y-4">
             <AuraSays text={scenario.intro} />
-            {scenario.questions.map((q, qi) => {
-              const done = !!answers[q.id];
-              const active = qi === firstUnanswered;
-              return (
-                <motion.div
-                  key={q.id}
-                  variants={fadeUp}
-                  className={`tile tile-static p-5 transition-all duration-300 ${!active && !done ? "opacity-45" : ""} ${active ? "!border-pine/40 shadow-md shadow-pine/5" : ""}`}
+
+            <motion.div variants={fadeUp} className="tile tile-static overflow-hidden">
+              {/* шапка мастера */}
+              <div className="flex items-center gap-3 border-b border-line/70 px-5 py-3.5">
+                <button
+                  type="button"
+                  onClick={() => goStep(Math.max(0, stepIdx - 1))}
+                  disabled={stepIdx === 0 || launching}
+                  aria-label="Предыдущий вопрос"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-soft transition hover:border-pine/50 hover:text-pine disabled:cursor-not-allowed disabled:opacity-35"
                 >
-                  <p className="label-caps mb-1">
-                    Вопрос {qi + 1} из {scenario.questions.length}
-                    {done && <span className="ml-2 !text-pine">· ответ есть</span>}
-                  </p>
-                  <p className="mb-3 text-[16px] font-semibold">{q.title}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {q.options.map((o) => {
-                      const on = answers[q.id] === o.id;
-                      return (
-                        <button
-                          key={o.id}
-                          type="button"
-                          disabled={!active && !done}
-                          onClick={() => answer(q.id, o.id)}
-                          className={`chip ${on ? "chip-on" : ""} disabled:cursor-not-allowed`}
-                        >
-                          {on && <Check size={14} className="text-pine" />}
-                          {o.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </motion.div>
-              );
-            })}
+                  <ArrowLeft size={15} />
+                </button>
+                <p className="label-caps flex-1">
+                  Вопрос {stepIdx + 1} из {totalQ}
+                </p>
+                <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-pine">
+                  <span className="live-dot" />
+                  {launching ? "запускаю поиск" : "отвечайте — это быстро"}
+                </span>
+              </div>
+
+              {/* сегментный прогресс */}
+              <div className="flex gap-1 px-5 pt-4" aria-hidden>
+                {scenario.questions.map((q, i) => {
+                  const filled = !!answers[q.id];
+                  const current = i === stepIdx;
+                  return (
+                    <button
+                      key={q.id}
+                      type="button"
+                      onClick={() => goStep(i)}
+                      aria-label={`Вопрос ${i + 1}`}
+                      className="group h-2 flex-1 overflow-hidden rounded-full bg-line/50 transition hover:bg-line"
+                    >
+                      <motion.span
+                        className="block h-full rounded-full bg-pine"
+                        initial={false}
+                        animate={{ width: filled ? "100%" : current ? "38%" : "0%" }}
+                        transition={{ type: "spring", stiffness: 120, damping: 18 }}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* сам вопрос */}
+              <div className="relative px-5 pb-5 pt-4">
+                <AnimatePresence mode="wait" custom={wizardDir} initial={false}>
+                  <motion.div
+                    key={scenario.questions[stepIdx].id}
+                    custom={wizardDir}
+                    initial={{ opacity: 0, x: 44 * wizardDir }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -44 * wizardDir }}
+                    transition={{ type: "spring", stiffness: 160, damping: 20 }}
+                  >
+                    <p className="mb-4 font-display text-[19px] font-semibold leading-snug">
+                      {scenario.questions[stepIdx].title}
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {scenario.questions[stepIdx].options.map((o) => {
+                        const on = answers[scenario.questions[stepIdx].id] === o.id;
+                        return (
+                          <button
+                            key={o.id}
+                            type="button"
+                            onClick={() => pick(scenario.questions[stepIdx].id, o.id)}
+                            className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3.5 text-left text-[14.5px] font-medium transition-all duration-200 ${
+                              on
+                                ? "border-pine/60 bg-pine/10 text-ink shadow-sm shadow-pine/10"
+                                : "border-line bg-card text-ink hover:-translate-y-0.5 hover:border-pine/40 hover:bg-pine/5"
+                            }`}
+                          >
+                            <span>{o.label}</span>
+                            <span
+                              className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border transition ${
+                                on ? "border-pine bg-pine text-pine-fg" : "border-line text-transparent"
+                              }`}
+                            >
+                              <Check size={12} strokeWidth={3} />
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
+
+                {launching && (
+                  <motion.p
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-4 flex items-center gap-2 text-[13.5px] font-semibold text-pine"
+                  >
+                    <Loader2 size={15} className="animate-spin" style={{ animationDuration: "1.2s" }} />
+                    Всё поняла — собираю команду…
+                  </motion.p>
+                )}
+              </div>
+
+              {/* сводка ответов */}
+              <div className="flex flex-wrap items-center gap-1.5 border-t border-line/70 px-5 py-3">
+                <span className="label-caps mr-1">Ваши ответы</span>
+                {scenario.questions.map((q, i) => {
+                  const a = q.options.find((o) => o.id === answers[q.id]);
+                  return (
+                    <button
+                      key={q.id}
+                      type="button"
+                      onClick={() => goStep(i)}
+                      disabled={launching}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-semibold transition disabled:cursor-not-allowed ${
+                        a ? "bg-pine/10 text-pine hover:bg-pine/15" : "bg-line/40 text-faint hover:bg-line/60"
+                      }`}
+                    >
+                      {a ? <Check size={11} /> : <span className="h-1.5 w-1.5 rounded-full bg-faint/50" />}
+                      {a ? a.label : q.summaryLabel ?? `Шаг ${i + 1}`}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+
             <motion.p variants={fadeUp} className="flex items-center gap-1.5 pt-1 text-[13px] text-faint">
               <Check size={14} className="text-pine" />
               Ответьте на все — и Aura сразу начнёт искать. Поиск бесплатный.
@@ -433,10 +572,10 @@ function SearchFlow({ query }: { query: string }) {
 
         {/* ── РАБОТА ── */}
         {phase === "working" && (
-          <motion.section key="working" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -12 }} className="mx-auto max-w-3xl space-y-5">
+          <motion.section key="working" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -12 }} className="mx-auto max-w-5xl space-y-5">
             <AuraSays text={scenario.intro} />
-            {scenario.type === "service_search" && <TaskSummary scenario={scenario} answers={answers} />}
-            <ProcessPanel steps={scenario.process} activeIndex={activeStep} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+            {scenario.type === "service_search" && <div className="mx-auto max-w-3xl"><TaskSummary scenario={scenario} answers={answers} /></div>}
+            <ProcessPanel plan={scaledPlan} elapsed={elapsed} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
             <div className="space-y-3" aria-hidden>
               <div className="tile shimmer h-32" />
               <div className="grid gap-3 sm:grid-cols-2">
@@ -450,7 +589,7 @@ function SearchFlow({ query }: { query: string }) {
         {/* ── РЕЗУЛЬТАТ ── */}
         {phase === "done" && (
           <motion.section key="done" variants={stagger} initial="hidden" animate="show" className="space-y-6">
-            <ProcessPanel steps={scenario.process} activeIndex={activeStep} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+            <ProcessPanel plan={scaledPlan} elapsed={elapsed} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
             <SectionNav ids={navIds} />
 
             <SummaryStrip scenario={scenario} onShowProcess={() => { setCollapsed(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
@@ -461,12 +600,18 @@ function SearchFlow({ query }: { query: string }) {
                 onClick={() => {
                   started.current = false;
                   setAnswers({});
+                  setStepIdx(0);
+                  setWizardDir(1);
+                  setLaunching(false);
                   setChosenCompany(null);
                   setContactSent(false);
-                  setActiveStep(0);
-                  setPhase(scenario.questions.length ? "clarify" : "working");
-                  if (scenario.questions.length === 0) startProcess();
-                  else setCollapsed(false);
+                  setElapsed(0);
+                  if (scenario.questions.length) {
+                    setPhase("clarify");
+                    setCollapsed(false);
+                  } else {
+                    startProcess();
+                  }
                 }}
               >
                 <RotateCcw size={14} />

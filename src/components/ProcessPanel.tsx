@@ -1,10 +1,10 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ChevronDown, ExternalLink, Loader2, Search, Zap } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, Loader2, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { computeStats } from "../data/scenarios";
 import { spring } from "../lib/motion";
-import { fmtNum, isFastMode, speed, useCountUp, useTyped } from "../lib/utils";
-import type { FeedItem, ProcessStep } from "../types";
+import { fmtNum, speed, useCountUp, useTyped } from "../lib/utils";
+import type { FeedItem, Lane, ProcessPlan } from "../types";
 
 /* ─────────── Элементы живой ленты ─────────── */
 
@@ -35,7 +35,11 @@ function MarketPill({ item, live }: { item: FeedItem; live: boolean }) {
         done ? "border-pine/40 bg-pine/10 text-ink" : "border-line bg-card text-soft"
       }`}
     >
-      {done ? <Check size={11} className="text-pine" /> : <Loader2 size={11} className="animate-spin text-faint" style={{ animationDuration: "1.1s" }} />}
+      {done ? (
+        <Check size={11} className="text-pine" />
+      ) : (
+        <Loader2 size={11} className="animate-spin text-faint" style={{ animationDuration: "1.1s" }} />
+      )}
       {item.text}
       {done && item.count !== undefined && (
         <b className="text-pine">{item.detail === "ответ" ? `${item.count} мин` : fmtNum(item.count)}</b>
@@ -73,21 +77,21 @@ function LinkTicker({ item, live }: { item: FeedItem; live: boolean }) {
   );
 }
 
-function StatRow({ item, live }: { item: FeedItem; live: boolean }) {
+function StatRow({ item }: { item: FeedItem }) {
   const n = useCountUp(item.count ?? 0, 650);
   return (
     <div className="flex items-baseline gap-2">
       {item.count !== undefined && (
-        <span className="font-mono text-[19px] font-bold leading-none text-pine">{live || n ? fmtNum(n) : "—"}</span>
+        <span className="font-mono text-[19px] font-bold leading-none text-pine">{n ? fmtNum(n) : "—"}</span>
       )}
       <span className="text-[13px] font-medium text-ink">{item.text}</span>
     </div>
   );
 }
 
-function CompareList({ items, live }: { items: FeedItem[]; live: boolean }) {
+function CompareList({ items }: { items: FeedItem[] }) {
   const max = Math.max(...items.map((i) => i.count ?? 1), 1);
-  const best = items.reduce((a, b) => ((b.count ?? 0) > (a.count ?? 0) ? b : a), items[0]);
+  const best = items.find((i) => i.best) ?? items.reduce((a, b) => ((b.count ?? 0) > (a.count ?? 0) ? b : a), items[0]);
   return (
     <ul className="space-y-1.5">
       {items.map((it) => {
@@ -101,7 +105,9 @@ function CompareList({ items, live }: { items: FeedItem[]; live: boolean }) {
             <div className="relative flex items-center justify-between gap-2">
               <span className="truncate text-[12.5px] font-semibold">
                 {it.text}
-                {isBest && <span className="ml-1.5 rounded bg-pine px-1.5 py-0.5 text-[9.5px] font-bold uppercase text-pine-fg">лучший</span>}
+                {isBest && (
+                  <span className="ml-1.5 rounded bg-pine px-1.5 py-0.5 text-[9.5px] font-bold uppercase text-pine-fg">лучший</span>
+                )}
               </span>
               <span className="shrink-0 truncate font-mono text-[11px] text-soft">{it.detail}</span>
             </div>
@@ -112,131 +118,135 @@ function CompareList({ items, live }: { items: FeedItem[]; live: boolean }) {
   );
 }
 
-function FeedArea({ feeds, shown, live }: { feeds: FeedItem[]; shown: number; live: boolean }) {
-  const items = feeds.slice(0, shown);
-  const compareItems = items.filter((f) => f.kind === "compare");
-  // маркетплейсы группируются в одну строку пилюль на месте первого вхождения
-  const simple: FeedItem[] = [];
-  let marketsIn = false;
-  for (const f of items) {
-    if (f.kind === "compare") continue;
-    if (f.kind === "market") {
-      if (marketsIn) continue;
-      marketsIn = true;
-    }
-    simple.push(f);
-  }
-  return (
-    <div className="bg-grid relative overflow-hidden rounded-xl border border-line/70 bg-bg2/50 p-3">
-      {live && <span className="scanline" />}
-      <div className="relative space-y-2.5">
-        <AnimatePresence initial={false}>
-          {simple.map((f, i) => (
-            <motion.div
-              key={`${f.kind}-${f.text}-${i}`}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ type: "spring", stiffness: 160, damping: 18 }}
-            >
-              {f.kind === "query" && <QueryLine item={f} live={live} />}
-              {f.kind === "market" && <MarketPills items={items.filter((x) => x.kind === "market")} live={live} />}
-              {f.kind === "link" && <LinkTicker item={f} live={live} />}
-              {f.kind === "check" && (
-                <p className="flex items-start gap-1.5 text-[12.5px] text-ink">
-                  <Check size={13} className="mt-0.5 shrink-0 text-pine" />
-                  {f.text}
-                </p>
-              )}
-              {f.kind === "stat" && <StatRow item={f} live={live} />}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-        {compareItems.length > 0 && <CompareList items={compareItems} live={live} />}
-      </div>
-    </div>
-  );
-}
+/* ─────────── Дорожка одного специалиста ─────────── */
 
-function MarketPills({ items, live }: { items: FeedItem[]; live: boolean }) {
+function LaneCard({ lane, elapsed }: { lane: Lane; elapsed: number }) {
+  const laneElapsed = Math.max(0, Math.min(lane.duration, elapsed - lane.offset));
+  const started = laneElapsed > 0;
+  const done = laneElapsed >= lane.duration;
+  const live = started && !done;
+
+  const slot = lane.duration / (lane.feeds.length + 1);
+  const shown = done ? lane.feeds.length : Math.min(lane.feeds.length, Math.floor(laneElapsed / slot));
+  const items = lane.feeds.slice(0, shown);
+  const compareItems = items.filter((f) => f.kind === "compare");
+  const simple = items.filter((f) => f.kind !== "compare");
+  const markets = simple.filter((f) => f.kind === "market");
+  const firstMarketIdx = simple.findIndex((f) => f.kind === "market");
+
   return (
-    <span className="flex flex-wrap gap-1.5">
-      {items.map((it) => (
-        <MarketPill key={it.text} item={it} live={live} />
-      ))}
-    </span>
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: started ? 1 : 0.45, y: 0 }}
+      transition={spring}
+      className={`flex flex-col rounded-2xl border bg-card/60 p-3 transition-colors duration-500 ${
+        live ? "border-pine/40" : done ? "border-line" : "border-line/60"
+      }`}
+    >
+      <div className="mb-2 flex items-center gap-2.5">
+        <span
+          className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl transition-colors ${
+            done ? "bg-pine/14 text-pine" : "bg-amber-soft text-amber"
+          }`}
+        >
+          {done ? <Check size={15} /> : <lane.icon size={15} />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13.5px] font-bold leading-tight">{lane.role}</p>
+          <p className={`truncate text-[11.5px] ${done ? "text-pine" : "text-faint"}`}>
+            {done ? lane.result : started ? "работает…" : "подключается…"}
+          </p>
+        </div>
+        <span className={`h-2 w-2 shrink-0 rounded-full ${done ? "bg-pine" : "bg-amber"}`}
+          style={done ? undefined : { animation: "aura-pulse 1.3s ease-out infinite" }}
+        />
+      </div>
+
+      <div className="bg-grid relative min-h-[74px] flex-1 overflow-hidden rounded-xl border border-line/70 bg-bg2/50 p-2.5">
+        {live && <span className="scanline" />}
+        <div className="relative space-y-2">
+          <AnimatePresence initial={false}>
+            {simple.map((f, i) => (
+              <motion.div
+                key={`${f.kind}-${f.text}-${i}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 160, damping: 18 }}
+              >
+                {f.kind === "query" && <QueryLine item={f} live={live} />}
+                {f.kind === "market" &&
+                  (i === firstMarketIdx ? (
+                    <span className="flex flex-wrap gap-1.5">
+                      {markets.map((m) => (
+                        <MarketPill key={m.text} item={m} live={live} />
+                      ))}
+                    </span>
+                  ) : null)}
+                {f.kind === "link" && <LinkTicker item={f} live={live} />}
+                {f.kind === "check" && (
+                  <p className="flex items-start gap-1.5 text-[12px] leading-snug text-ink">
+                    <Check size={12.5} className="mt-0.5 shrink-0 text-pine" />
+                    {f.text}
+                  </p>
+                )}
+                {f.kind === "stat" && <StatRow item={f} />}
+              </motion.div>
+            ))}
+          </AnimatePresence>
+          {compareItems.length > 0 && <CompareList items={compareItems} />}
+          {!started && <p className="font-mono text-[11px] text-faint">ожидание…</p>}
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
 /* ─────────── Панель «Что я сейчас делаю» ─────────── */
 
 export function ProcessPanel({
-  steps,
-  activeIndex,
+  plan,
+  elapsed,
   collapsed,
   onToggle,
 }: {
-  steps: ProcessStep[];
-  activeIndex: number;
+  plan: ProcessPlan;
+  elapsed: number;
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const finished = activeIndex >= steps.length;
-  const running = !finished;
-  const current = running ? steps[activeIndex] : null;
-  const stats = computeStats(steps);
-
-  // постепенное появление фидов активного шага
-  const [revealed, setRevealed] = useState<Record<number, number>>({});
-  useEffect(() => {
-    setRevealed((prev) => {
-      const next = { ...prev };
-      for (let i = 0; i < activeIndex && i < steps.length; i++) next[i] = steps[i].feeds.length;
-      return next;
-    });
-    if (activeIndex >= steps.length) return;
-    const step = steps[activeIndex];
-    const iv = window.setInterval(() => {
-      setRevealed((prev) => {
-        const cur = prev[activeIndex] ?? 0;
-        if (cur >= step.feeds.length) {
-          window.clearInterval(iv);
-          return prev;
-        }
-        return { ...prev, [activeIndex]: cur + 1 };
-      });
-    }, speed(Math.max(170, step.duration / (step.feeds.length + 1))));
-    return () => window.clearInterval(iv);
-  }, [activeIndex, steps]);
-
-  const doneCount = Math.min(activeIndex, steps.length);
+  const finished = elapsed >= plan.total;
+  const stats = computeStats(plan);
+  const doneLanes = plan.lanes.filter((l) => elapsed - l.offset >= l.duration).length;
+  const progress = Math.min(100, (elapsed / plan.total) * 100);
 
   return (
     <div className="glass sticky top-[70px] z-30 overflow-hidden rounded-3xl shadow-lg shadow-black/5 sm:top-[76px]">
       <button onClick={onToggle} aria-expanded={!collapsed} className="flex w-full items-center gap-3 px-4 py-3.5 text-left sm:px-5">
         <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-pine/12 text-pine">
-          {running ? (
+          {finished ? <Check size={17} /> : (
             <>
               <Loader2 size={17} className="animate-spin" style={{ animationDuration: "1.4s" }} />
               <span className="event-pulse absolute inset-0 rounded-full" />
             </>
-          ) : (
-            <Check size={17} />
           )}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="label-caps block">{running ? "Что я сейчас делаю" : "Что я сделала"}</span>
-          {running && current ? (
-            <span className="block truncate text-[14px] font-medium text-ink">{current.text}…</span>
-          ) : (
+          <span className="label-caps block">{finished ? "Что сделала команда" : "Что я сейчас делаю"}</span>
+          {finished ? (
             <span className="block truncate text-[13px] font-medium text-soft">
+              {plan.lanes.length} специалиста ·{" "}
               {stats.offers > 0 ? `${fmtNum(stats.offers)} предложений` : `${stats.responses} ответов`} ·{" "}
-              {stats.markets} площадок · {stats.pages} страниц · ~{stats.sec} с
+              {stats.pages} страниц · ~{stats.sec} с
+            </span>
+          ) : (
+            <span className="block truncate text-[14px] font-medium text-ink">
+              {plan.lanes.length} специалиста работают параллельно · готово {doneLanes} из {plan.lanes.length}
             </span>
           )}
         </span>
-        {running && (
+        {!finished && (
           <span className="hidden shrink-0 font-mono text-[12px] font-semibold text-soft sm:block">
-            {doneCount}/{steps.length}
+            {Math.round(progress)}%
           </span>
         )}
         <motion.span animate={{ rotate: collapsed ? -90 : 0 }} transition={spring} className="shrink-0 text-faint">
@@ -247,7 +257,7 @@ export function ProcessPanel({
       <div className="h-[3px] w-full bg-line/60">
         <motion.div
           className="h-full rounded-r-full bg-pine"
-          animate={{ width: `${(doneCount / steps.length) * 100}%` }}
+          animate={{ width: `${progress}%` }}
           transition={{ type: "spring", stiffness: 80, damping: 20 }}
         />
       </div>
@@ -262,48 +272,11 @@ export function ProcessPanel({
             transition={{ type: "spring", stiffness: 110, damping: 18 }}
             className="overflow-hidden"
           >
-            <ul className="nice-scroll max-h-[430px] space-y-2 overflow-y-auto px-4 pb-4 pt-2.5 sm:px-5">
-              {steps.map((step, i) => {
-                const done = i < activeIndex || finished;
-                const active = i === activeIndex && running;
-                if (i > activeIndex && running) return null; // будущие шаги не показываем
-                const shown = done || active ? (revealed[i] ?? 0) : 0;
-                return (
-                  <motion.li
-                    key={step.id}
-                    initial={{ opacity: 0, x: -14 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={spring}
-                    className="space-y-2"
-                  >
-                    <div
-                      className={`flex items-center gap-3 rounded-xl px-2 py-1.5 text-[14px] ${
-                        active ? "event-pulse bg-pine/8 font-semibold text-ink" : ""
-                      } ${done ? "text-ink" : "text-faint"}`}
-                    >
-                      <span
-                        className={`grid h-6.5 w-6.5 shrink-0 place-items-center rounded-full ${
-                          done ? "bg-pine/14 text-pine" : active ? "bg-amber-soft text-amber" : "bg-line/50 text-faint"
-                        }`}
-                        style={{ width: 26, height: 26 }}
-                      >
-                        {done ? <Check size={13} /> : <step.icon size={13} />}
-                      </span>
-                      <span className="flex-1">{step.text}</span>
-                      {done && !isFastMode() && (
-                        <span className="font-mono text-[11px] text-faint">{(step.duration / 1000).toFixed(1).replace(".", ",")} с</span>
-                      )}
-                      {active && <Zap size={13} className="text-amber" />}
-                    </div>
-                    {step.feeds.length > 0 && shown > 0 && (
-                      <div className="pl-10">
-                        <FeedArea feeds={step.feeds} shown={shown} live={active} />
-                      </div>
-                    )}
-                  </motion.li>
-                );
-              })}
-            </ul>
+            <div className="grid gap-2.5 p-4 sm:p-5 md:grid-cols-2">
+              {plan.lanes.map((lane) => (
+                <LaneCard key={lane.id} lane={lane} elapsed={elapsed} />
+              ))}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
