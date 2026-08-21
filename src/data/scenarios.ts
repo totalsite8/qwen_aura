@@ -1,24 +1,19 @@
-import type { LucideIcon } from "lucide-react";
 import {
   BookOpen,
-  BadgeCheck,
   Gift,
   Layers,
   LineChart,
   ListChecks,
-  MessageSquare,
-  PackageSearch,
+  Radar,
   Scale,
   Send,
   ShieldCheck,
-  ShoppingBag,
-  Sparkles,
-  Wand2,
+  Truck,
 } from "lucide-react";
-import type { ClarifyQuestion, CompanyOffer, FeedItem, ProcessStep, QueryType, Scenario } from "../types";
+import type { ClarifyQuestion, CompanyOffer, FeedItem, Lane, ProcessPlan, QueryType, Scenario } from "../types";
 import { classifyQuery, norm } from "../lib/classify";
-import { fmtMoney, hashStr, mulberry } from "../lib/utils";
-import { CATEGORIES, HERO_TEXTS, SERVICES, EXACT_PRODUCTS, type QuerySeed } from "./queries";
+import { fmtMoney, fmtNum, hashStr, mulberry } from "../lib/utils";
+import { CATEGORIES, EXACT_PRODUCTS, HERO_TEXTS, SERVICES, type QuerySeed } from "./queries";
 import {
   EARBUDS_PRODUCTS,
   GIFT_DIRECTIONS,
@@ -29,9 +24,9 @@ import {
   serviceOffersFor,
 } from "./products";
 
-/* ─────────── Живая лента «Что я сейчас делаю» ───────────
-   Каждый шаг — не просто пункт, а реальная работа: запросы,
-   перебор магазинов и страниц, сравнение цен, проверки. */
+/* ─────────── Команда Aura: параллельные дорожки специалистов ───────────
+   Пока пользователь смотрит, несколько специалистов одновременно
+   серфят сеть: запросы, магазины, страницы, проверки — у каждого свой поток. */
 
 const MKT_GOODS = ["Ozon", "Wildberries", "Яндекс Маркет", "Мегамаркет", "DNS", "М.Видео", "Ситилинк", "Авито"];
 const MKT_GIFT = ["Ozon", "Wildberries", "Яндекс Маркет", "Мегамаркет", "Lamoda", "Авито"];
@@ -41,7 +36,13 @@ const chk = (text: string): FeedItem => ({ kind: "check", text });
 const stat = (text: string, count?: number): FeedItem => ({ kind: "stat", text, count });
 const link = (text: string, urls: string[]): FeedItem => ({ kind: "link", text, urls });
 const market = (text: string, count: number, detail?: string): FeedItem => ({ kind: "market", text, count, detail });
-const cmp = (text: string, detail: string, count: number): FeedItem => ({ kind: "compare", text, detail, count });
+const cmp = (text: string, detail: string, count: number, best = false): FeedItem => ({
+  kind: "compare",
+  text,
+  detail,
+  count,
+  best,
+});
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 26);
 
@@ -51,117 +52,181 @@ function marketFeeds(mkts: string[], seed: number): FeedItem[] {
   return picks.map((m) => market(m, 8 + Math.floor(rnd() * 26)));
 }
 
-function offerTotal(feeds: FeedItem[]): number {
-  return feeds.filter((f) => f.kind === "market").reduce((a, f) => a + (f.count ?? 0), 0);
-}
+const offerTotal = (feeds: FeedItem[]) =>
+  feeds.filter((f) => f.kind === "market").reduce((a, f) => a + (f.count ?? 0), 0);
 
-/** Собирает «живой» процесс под конкретный запрос и уже готовые результаты */
-export function processFor(
+const LANE_TIMING: { offset: number; duration: number }[] = [
+  { offset: 0, duration: 7200 },
+  { offset: 350, duration: 8200 },
+  { offset: 750, duration: 9000 },
+  { offset: 1150, duration: 9900 },
+];
+
+/** Собирает план работы команды под конкретный запрос и уже готовые результаты */
+export function buildPlan(
   type: QueryType,
   query: string,
   products: Scenario["products"],
   companies: Scenario["companies"]
-): ProcessStep[] {
+): ProcessPlan {
   const seed = hashStr(query);
   const sl = slug(query);
   const rnd = mulberry(seed + 7);
-  const mk = (list: [LucideIcon, string, number, FeedItem[]][]): ProcessStep[] =>
-    list.map(([icon, text, duration, feeds], i) => ({ id: `s${i}`, icon, text, duration, feeds }));
+  const chosen = products[0];
+  const lanes: Lane[] = [];
+  const add = (role: string, icon: Lane["icon"], feeds: FeedItem[], result: string, i: number) =>
+    lanes.push({ id: `lane-${i}`, role, icon, feeds, result, ...LANE_TIMING[i] });
 
   const scan = marketFeeds(MKT_GOODS, seed);
   const scanTotal = offerTotal(scan);
 
-  const productRows: FeedItem[] = products.slice(0, 3).map((p) =>
-    cmp(p.seller, `${fmtMoney(p.price)} · ${p.warranty.toLowerCase()}`, Math.round(p.score * 10))
-  );
-  // count здесь — оценка сравнения (не цена), чтобы «лучший» доставался рекомендации
-  const companyRows: FeedItem[] = companies.slice(0, 4).map((c, i) => {
-    const score = c.recommended ? 96 : Math.max(55, 88 - i * 9 - (hashStr(c.id) % 7));
-    return cmp(c.companyName, `${c.estimatedPrice} · гарантия ${c.warranty}`, score);
+  const priceRows = (i: number) =>
+    products.slice(0, 3).map((p, j) =>
+      cmp(p.seller, `${fmtMoney(p.price)} · ${p.delivery.toLowerCase()}`, Math.round(p.score * 10), j === i)
+    );
+
+  const companyRows: FeedItem[] = companies.slice(0, 4).map((c) => {
+    const score = c.recommended ? 96 : Math.max(55, 88 - (hashStr(c.id) % 17));
+    return cmp(c.companyName, `${c.estimatedPrice} · гарантия ${c.warranty}`, score, c.recommended);
   });
 
   if (type === "exact_product") {
-    return mk([
-      [Sparkles, "Понимаю задачу", 1300, [q(`«${query}»`), chk("Определила: конкретная модель — без лишних вопросов")]],
-      [ShoppingBag, "Сканирую магазины", 2400, [q(`${query} купить цена`), ...scan, stat("Предложений собрано", scanTotal)]],
-      [BookOpen, "Читаю свежие обзоры", 1700, [
-        link("Открываю обзоры и тесты", [
-          `youtube.com/results?search_query=${sl}-обзор`,
-          `4pda.to/forum/index.php?showtopic=${sl}`,
-          `ixbt.com/review/${sl}.html`,
-        ]),
-        stat("Обзоров и тестов изучено", 24 + Math.floor(rnd() * 20)),
-      ]],
-      [Scale, "Сравниваю цены и условия", 2000, [...productRows, stat(`${scanTotal} → достойных вариантов`, Math.min(12, 4 + products.length))]],
-      [ShieldCheck, "Проверяю, действительно ли это лучший вариант", 1600, [
-        link("Сверяю карточки продавцов", [`ozon.ru/product/${sl}`, `market.yandex.ru/product/${sl}`, `avito.ru/${sl}`]),
-        chk("Условия возврата и гарантии"),
-        chk("История цены за 90 дней"),
-      ]],
-      [Wand2, "Готовлю результат", 1100, [stat("Карточка «Выбор Aura» собрана")]],
-    ]);
-  }
+    add("Искатель цен", Radar, [
+      q(`«${query}» купить цена`),
+      ...scan,
+      ...priceRows(0),
+      stat("Предложений собрано", scanTotal),
+    ], `Лучшая цена: ${chosen ? fmtMoney(chosen.price) : "найдена"}`, 0);
 
-  if (type === "category_search") {
-    return mk([
-      [Sparkles, "Понимаю задачу", 1200, [q(`«${query}»`), chk("Уточнила параметры — они учтены в поиске")]],
-      [PackageSearch, "Собираю подходящие варианты", 2200, [q(`${query} рейтинг 2026`), ...scan, stat("Предложений собрано", scanTotal)]],
-      [BookOpen, "Читаю свежие обзоры и отзывы", 1800, [
-        link("Смотрю подборки и тесты", [`youtube.com/results?search_query=лучшие-${sl}`, `ichip.ru/podborki/${sl}`, `roskachestvo.gov.ru/research/${sl}`]),
-        stat("Отзывов проанализировано", 300 + Math.floor(rnd() * 600)),
-      ]],
-      [Scale, "Сравниваю отзывы, цены и надёжность", 2000, [...productRows, stat("В финал прошли", products.length)]],
-      [ShieldCheck, "Проверяю, действительно ли это лучший вариант", 1500, [
-        link("Перепроверяю finalists", [`ozon.ru/category/${sl}`, `wildberries.ru/catalog/${sl}`]),
-        chk("Цена не выше средней по подборке"),
-      ]],
-      [Wand2, "Готовлю результат", 1000, [stat("Подборка собрана")]],
-    ]);
-  }
+    add("Ревизор подлинности", ShieldCheck, [
+      q(`${query} официальный магазин`),
+      link("Сверяю карточки продавцов", [`ozon.ru/product/${sl}`, `market.yandex.ru/product/${sl}`, `avito.ru/${sl}`]),
+      chk("Продавец с высоким рейтингом и историей"),
+      chk("Комплектация совпадает с официальной"),
+      chk("История цены за 90 дней — без накруток"),
+      stat("Параметров проверено", 340 + Math.floor(rnd() * 120)),
+    ], "Подлинность и гарантия подтверждены", 1);
 
-  if (type === "gift_search") {
+    add("Исследователь отзывов", BookOpen, [
+      q(`${query} отзывы ${new Date().getFullYear()}`),
+      link("Открываю обзоры и отзывы", [
+        `youtube.com/results?search_query=${sl}-обзор`,
+        `4pda.to/forum/index.php?showtopic=${sl}`,
+        `ixbt.com/review/${sl}.html`,
+      ]),
+      stat("Отзывов прочитано", chosen?.reviewsCount ?? 900),
+      chk(`Тон отзывов: ${chosen?.sentiment.pos ?? 90}% положительные`),
+      chk("Жалоб на брак за полгода — единицы"),
+    ], `${fmtNum(chosen?.reviewsCount ?? 0)} отзывов · ${chosen?.sentiment.pos ?? 90}% «за»}`, 2);
+
+    add("Аналитик доставки", Truck, [
+      q(`${query} доставка сроки`),
+      ...products.slice(0, 3).map((p, j) => cmp(p.seller, `доставка: ${p.delivery.toLowerCase()}`, 90 - j * 8, j === 0)),
+      chk("Условия возврата — 14 дней"),
+      chk("Доставка с отслеживанием"),
+      stat("Вариантов доставки сверено", products.length + 2),
+    ], chosen ? `Доставка: ${chosen.delivery.toLowerCase()}` : "Доставка сверена", 3);
+  } else if (type === "category_search") {
+    add("Аналитик подбора", Layers, [
+      q(`«${query}» рейтинг ${new Date().getFullYear()}`),
+      link("Смотрю подборки и тесты", [`youtube.com/results?search_query=лучшие-${sl}`, `ichip.ru/podborki/${sl}`, `roskachestvo.gov.ru/research/${sl}`]),
+      stat("Моделей в категории", 74 + Math.floor(rnd() * 40)),
+      chk("Ваши ответы учтены: бюджет и сценарий"),
+      stat("→ достойных кандидатов", 10 + Math.floor(rnd() * 6)),
+    ], `${products.length} финалистов из ~90 моделей`, 0);
+
+    add("Искатель цен", Radar, [
+      q(`${query} цена`),
+      ...scan,
+      ...priceRows(0),
+      stat("Предложений собрано", scanTotal),
+    ], chosen ? `Лучшая цена: ${fmtMoney(chosen.price)}` : "Цены собраны", 1);
+
+    add("Исследователь отзывов", BookOpen, [
+      q(`${query} отзывы реальные`),
+      link("Читаю ветки обсуждений", [`otzovik.com/search/${sl}`, `irecommend.ru/search/${sl}`, `market.yandex.ru/${sl}/reviews`]),
+      stat("Отзывов проанализировано", 380 + Math.floor(rnd() * 500)),
+      chk("Отсеяла накрученные оценки"),
+    ], "Отзывы очищены от накруток", 2);
+
+    add("Ревизор надёжности", ShieldCheck, [
+      q(`${query} надёжный продавец`),
+      link("Проверяю продавцов", [`ozon.ru/category/${sl}`, `wildberries.ru/catalog/${sl}`]),
+      chk("Рейтинг продавца ≥ 4.7"),
+      chk("Возврат и гарантия — без мелкого шрифта"),
+      stat("Пунктов проверки", 12),
+    ], "Продавцы проверены по 12 пунктам", 3);
+  } else if (type === "gift_search") {
     const giftScan = marketFeeds(MKT_GIFT, seed + 3);
-    return mk([
-      [Sparkles, "Понимаю задачу", 1200, [q(`«${query}»`), chk("Учла интересы и бюджет из ответов")]],
-      [Gift, "Собираю идеи под интересы", 2100, [q(`подарок ${slug(query.replace(/подарок/i, "")).replace(/-/g, " ")} идеи 2026`), ...giftScan, stat("Идей собрано", offerTotal(giftScan))]],
-      [LineChart, "Проверяю, что сейчас актуально дарить", 1600, [
-        link("Смотрю тренды подарков", [`ozon.ru/highlight/${sl}`, `wildberries.ru/podborki/${sl}`]),
-        stat("Трендов проверено", 6 + Math.floor(rnd() * 6)),
-      ]],
-      [Scale, "Сравниваю цены и отзывы", 1700, [...productRows, stat("Направлений подарка", 3)]],
-      [BadgeCheck, "Убираю банальные варианты", 1400, [chk("Без носков и пены для бритья"), chk("Всё успеет приехать вовремя")]],
-      [Wand2, "Готовлю подборку", 1000, [stat("Подборка готова")]],
-    ]);
-  }
+    add("Искатель идей", Gift, [
+      q(`подарок ${slug(query.replace(/подарок/i, "")).replace(/-/g, " ")} идеи`),
+      ...giftScan,
+      link("Смотрю подарочные подборки", [`ozon.ru/highlight/${sl}`, `wildberries.ru/podborki/${sl}`]),
+      stat("Идей собрано", offerTotal(giftScan)),
+    ], "3 направления подарка", 0);
 
-  // service_search
-  const coScan: FeedItem[] = companies.map((c) => {
-    const m = c.responseTime.match(/(\d+)/);
-    return market(c.companyName, m ? parseInt(m[1], 10) : 60, "ответ");
-  });
-  return mk([
-    [Sparkles, "Понимаю задачу", 1200, [q(`«${query}»`), chk("Детали из ответов — в описании задачи")]],
-    [ListChecks, "Составила описание задачи", 1400, [stat("Понятное ТЗ для компаний готово")]],
-    [Send, "Отправила в проверенные компании", 1700, [q(`${query} — заявка`), ...coScan.slice(0, 6), stat("Компаний получили задачу", coScan.length)]],
-    [MessageSquare, "Получаю ответы", 2200, [
+    add("Аналитик трендов", LineChart, [
+      q(`что дарят в ${new Date().getFullYear()} тренды`),
+      link("Проверяю, что сейчас дарят", [`trendbox.ru/${sl}`, `pikabu.ru/tag/${sl}`]),
+      stat("Трендов проверено", 6 + Math.floor(rnd() * 6)),
+      chk("Без банальных носков и пены для бритья"),
+    ], "Только актуальные идеи", 1);
+
+    add("Искатель цен", Radar, [
+      ...priceRows(0),
+      chk("Укладываемся в бюджет из ответов"),
+      stat("Вариантов по карману", products.length + 4),
+    ], chosen ? `Главный вариант: ${fmtMoney(chosen.price)}` : "Бюджет соблюдён", 2);
+
+    add("Контролёр сроков", Truck, [
+      chk("Успеет приехать до праздника"),
+      ...products.slice(0, 3).map((p, j) => cmp(p.seller, `доставка: ${p.delivery.toLowerCase()}`, 88 - j * 7, j === 0)),
+      stat("Вариантов с быстрой доставкой", products.length),
+    ], chosen ? `Доставка: ${chosen.delivery.toLowerCase()}` : "Сроки проверены", 3);
+  } else {
+    const coSend: FeedItem[] = companies.map((c) => {
+      const m = c.responseTime.match(/(\d+)/);
+      return market(c.companyName, m ? parseInt(m[1], 10) : 60, "ответ");
+    });
+    const nHidden = companies.filter((c) => c.hiddenFeesWarning).length;
+
+    add("Составитель задачи", ListChecks, [
+      stat("Понятное описание задачи готово"),
+      chk("Бюджет и сроки зафиксированы"),
+      chk("Важные критерии — в приоритетах"),
+      stat("Компаний подобрано по специализации", companies.length + 3),
+    ], "Задача разослана компаниям", 0);
+
+    add("Сборщик ответов", Send, [
+      q(`${query} — заявка`),
+      ...coSend,
       link("Читаю ответы компаний", companies.slice(0, 3).map((c) => `${slug(c.companyName)}.ru/offer`)),
       stat("Развёрнутых ответов", companies.length),
-    ]],
-    [Scale, "Сравниваю цены и условия", 1700, [...companyRows, stat("Смета сверена по пунктам")]],
-    [ShieldCheck, "Проверяю скрытые доплаты", 1500, [
+    ], `${companies.length} ответов получено`, 1);
+
+    add("Аудитор смет", Scale, [
+      ...companyRows,
+      chk("Смета сверена по пунктам"),
+      stat("Строк сметы проверено", 22 + Math.floor(rnd() * 10)),
+    ], "Цены разложены по полочкам", 2);
+
+    add("Проверщик гарантии", ShieldCheck, [
       chk("Доставка и подъём включены?"),
       chk("Демонтаж и расходники в смете?"),
       chk("Гарантия — письменно в договоре"),
-    ]],
-    [Wand2, "Готовлю рекомендацию", 900, [stat("Рекомендация Aura готова")]],
-  ]);
+      stat("Скрытых доплат найдено", nHidden),
+    ], nHidden > 0 ? `Подсвечено доплат: ${nHidden}` : "Доплат не найдено", 3);
+  }
+
+  const total = Math.max(...lanes.map((l) => l.offset + l.duration));
+  return { lanes, total };
 }
 
-/** Сводка по процессу для финального итога */
-export function computeStats(steps: ProcessStep[]) {
-  let offers = 0, markets = 0, checks = 0, links = 0, pages = 0, responses = 0;
-  for (const s of steps)
-    for (const f of s.feeds) {
+/** Сводка по работе команды для финального итога */
+export function computeStats(plan: ProcessPlan) {
+  let offers = 0, markets = 0, checks = 0, pages = 0, responses = 0;
+  for (const l of plan.lanes)
+    for (const f of l.feeds) {
       if (f.kind === "market") {
         markets++;
         // в услугах count — минуты до ответа, а не предложения
@@ -169,13 +234,10 @@ export function computeStats(steps: ProcessStep[]) {
         else offers += f.count ?? 0;
       }
       if (f.kind === "check") checks++;
-      if (f.kind === "link") {
-        links++;
-        pages += f.urls?.length ?? 0;
-      }
+      if (f.kind === "link") pages += f.urls?.length ?? 0;
     }
-  const sec = Math.round(steps.reduce((a, s) => a + s.duration, 0) / 100) / 10;
-  return { offers, markets, checks, links, pages, responses, sec };
+  const sec = Math.round(plan.total / 100) / 10;
+  return { offers, markets, checks, pages, responses, sec };
 }
 
 export const CATEGORY_QUESTIONS: ClarifyQuestion[] = [
@@ -390,10 +452,10 @@ export const ATTENTION_GENERIC = [
 ];
 
 const INTRO: Record<QueryType, string> = {
-  exact_product: "Вижу конкретную модель. Проверю цены и надёжность продавцов — без лишних вопросов.",
-  category_search: "Поняла направление. Пара уточнений — и покажу только то, что подходит.",
-  gift_search: "Отличная задача. Уточню детали, чтобы подарок попал в цель.",
-  service_search: "Принято. Пара вопросов — и отправлю задачу в проверенные компании.",
+  exact_product: "Вижу конкретную модель. Запускаю команду: искатель цен, ревизор подлинности, исследователь отзывов и аналитик доставки — работают параллельно.",
+  category_search: "Поняла направление. Пара уточнений — и команда покажет только то, что подходит.",
+  gift_search: "Отличная задача. Уточню детали — и команда соберёт подарок, который попадёт в цель.",
+  service_search: "Принято. Пара вопросов — и команда отправит задачу в проверенные компании.",
 };
 
 const findSeed = (list: QuerySeed[], matched: string) =>
@@ -411,7 +473,7 @@ export function resolveScenario(raw: string): Scenario | null {
     type: c.type,
     label,
     questions: [],
-    process: [],
+    plan: { lanes: [], total: 0 },
     products: [],
     giftDirections: [],
     taskSummary: [],
@@ -464,8 +526,8 @@ export function resolveScenario(raw: string): Scenario | null {
     }
   }
 
-  // живой процесс собирается по уже готовым результатам — цифры везде честные
-  base.process = processFor(c.type, c.matched, base.products, base.companies);
+  // план работы команды собирается по уже готовым результатам — цифры везде честные
+  base.plan = buildPlan(c.type, c.matched, base.products, base.companies);
   return base;
 }
 

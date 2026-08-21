@@ -107,9 +107,9 @@ function SectionNav({ ids }: { ids: { id: string; label: string }[] }) {
   );
 }
 
-/* ─────────── Итог поиска: что я сделала ─────────── */
+/* ─────────── Итог поиска: что сделала команда ─────────── */
 function SummaryStrip({ scenario, onShowProcess }: { scenario: Scenario; onShowProcess: () => void }) {
-  const s = computeStats(scenario.process);
+  const s = computeStats(scenario.plan);
   const isService = scenario.type === "service_search";
   const cells = [
     { icon: Store, v: s.markets, label: isService ? "компаний" : "магазинов" },
@@ -121,7 +121,7 @@ function SummaryStrip({ scenario, onShowProcess }: { scenario: Scenario; onShowP
   return (
     <motion.section variants={fadeUp} id="itog" className="tile tile-static scroll-mt-44 overflow-hidden">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4">
-        <p className="label-caps">Что я сделала</p>
+        <p className="label-caps">Что сделала команда</p>
         <div className="flex flex-1 flex-wrap items-center gap-x-6 gap-y-2">
           {cells.map((c) => (
             <span key={c.label} className="inline-flex items-center gap-2">
@@ -132,8 +132,22 @@ function SummaryStrip({ scenario, onShowProcess }: { scenario: Scenario; onShowP
           ))}
         </div>
         <button className="btn btn-ghost !px-3.5 !py-1.5 text-[12.5px]" onClick={onShowProcess}>
-          Как я это сделала
+          Как мы это сделали
         </button>
+      </div>
+      <div className="nice-scroll flex gap-2 overflow-x-auto border-t border-line px-5 py-3">
+        {scenario.plan.lanes.map((l) => (
+          <span
+            key={l.id}
+            className="inline-flex shrink-0 items-center gap-2 rounded-full border border-line bg-bg2/60 px-3 py-1.5 text-[12px] font-medium text-soft"
+            title={l.result}
+          >
+            <l.icon size={13} className="text-pine" />
+            {l.role}
+            <span className="text-faint">·</span>
+            <span className="max-w-[240px] truncate text-ink">{l.result}</span>
+          </span>
+        ))}
       </div>
     </motion.section>
   );
@@ -279,7 +293,7 @@ function SearchFlow({ query }: { query: string }) {
     scenario && scenario.questions.length > 0 ? "clarify" : "working"
   );
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [activeStep, setActiveStep] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [buy, setBuy] = useState<{ p: Product; mode: "points" | "plain" } | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -291,25 +305,45 @@ function SearchFlow({ query }: { query: string }) {
   const started = useRef(false);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
+  // масштабированный план: ?fast=1 ускоряет команду
+  const scaledPlan = useMemo(
+    () =>
+      scenario
+        ? {
+            lanes: scenario.plan.lanes.map((l) => ({
+              ...l,
+              offset: speed(l.offset),
+              duration: speed(l.duration),
+            })),
+            total: speed(scenario.plan.total),
+          }
+        : { lanes: [], total: 0 },
+    [scenario]
+  );
+
   const startProcess = useCallback(() => {
     if (!scenario || started.current) return;
     started.current = true;
     setPhase("working");
     setCollapsed(false);
-    setActiveStep(0);
-    let acc = 420;
-    scenario.process.forEach((step, i) => {
-      timers.current.push(window.setTimeout(() => setActiveStep(i), speed(acc)));
-      acc += step.duration;
-    });
-    timers.current.push(window.setTimeout(() => setActiveStep(scenario.process.length), speed(acc)));
-    timers.current.push(
-      window.setTimeout(() => {
-        setPhase("done");
-        setCollapsed(true); // процесс схлопывается к итогу
-      }, speed(acc + 750))
-    );
+    setElapsed(0);
   }, [scenario]);
+
+  // тик времени, пока команда работает
+  useEffect(() => {
+    if (phase !== "working") return;
+    const t0 = performance.now();
+    const iv = window.setInterval(() => setElapsed(performance.now() - t0), 100);
+    return () => window.clearInterval(iv);
+  }, [phase]);
+
+  // команда закончила — схлопываем процесс к итогу
+  useEffect(() => {
+    if (phase === "working" && scaledPlan.total > 0 && elapsed >= scaledPlan.total + 500) {
+      setPhase("done");
+      setCollapsed(true);
+    }
+  }, [phase, elapsed, scaledPlan.total]);
 
   useEffect(() => {
     if (scenario && scenario.questions.length === 0) startProcess();
@@ -433,10 +467,10 @@ function SearchFlow({ query }: { query: string }) {
 
         {/* ── РАБОТА ── */}
         {phase === "working" && (
-          <motion.section key="working" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -12 }} className="mx-auto max-w-3xl space-y-5">
+          <motion.section key="working" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -12 }} className="mx-auto max-w-5xl space-y-5">
             <AuraSays text={scenario.intro} />
-            {scenario.type === "service_search" && <TaskSummary scenario={scenario} answers={answers} />}
-            <ProcessPanel steps={scenario.process} activeIndex={activeStep} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+            {scenario.type === "service_search" && <div className="mx-auto max-w-3xl"><TaskSummary scenario={scenario} answers={answers} /></div>}
+            <ProcessPanel plan={scaledPlan} elapsed={elapsed} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
             <div className="space-y-3" aria-hidden>
               <div className="tile shimmer h-32" />
               <div className="grid gap-3 sm:grid-cols-2">
@@ -450,7 +484,7 @@ function SearchFlow({ query }: { query: string }) {
         {/* ── РЕЗУЛЬТАТ ── */}
         {phase === "done" && (
           <motion.section key="done" variants={stagger} initial="hidden" animate="show" className="space-y-6">
-            <ProcessPanel steps={scenario.process} activeIndex={activeStep} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+            <ProcessPanel plan={scaledPlan} elapsed={elapsed} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
             <SectionNav ids={navIds} />
 
             <SummaryStrip scenario={scenario} onShowProcess={() => { setCollapsed(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
@@ -463,10 +497,13 @@ function SearchFlow({ query }: { query: string }) {
                   setAnswers({});
                   setChosenCompany(null);
                   setContactSent(false);
-                  setActiveStep(0);
-                  setPhase(scenario.questions.length ? "clarify" : "working");
-                  if (scenario.questions.length === 0) startProcess();
-                  else setCollapsed(false);
+                  setElapsed(0);
+                  if (scenario.questions.length) {
+                    setPhase("clarify");
+                    setCollapsed(false);
+                  } else {
+                    startProcess();
+                  }
                 }}
               >
                 <RotateCcw size={14} />
