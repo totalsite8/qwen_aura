@@ -1,9 +1,18 @@
-import type { ArtKind, CompanyOffer, GiftDirection, Product, ReliabilityCheck } from "../types";
+import type { ArtKind, CompanyOffer, GiftDirection, Product } from "../types";
 import { genHistory, hashStr, mulberry, fmtNum } from "../lib/utils";
 import type { QuerySeed } from "./queries";
 
 let uid = 0;
 const nextId = () => `p${++uid}-${Date.now().toString(36)}`;
+
+const SELLERS = [
+  "ТехноСити",
+  "Мир техники",
+  "Digital Store",
+  "Гипермаркет Электроники",
+  "СмартМаркет",
+  "Официальный магазин",
+];
 
 /** Универсальный конструктор товара с правдоподобными значениями по умолчанию */
 export function P(partial: Partial<Product> & Pick<Product, "title" | "price">): Product {
@@ -11,20 +20,26 @@ export function P(partial: Partial<Product> & Pick<Product, "title" | "price">):
   const seed = hashStr(id + partial.title);
   const rnd = mulberry(seed);
   const price = partial.price;
-  const checks: ReliabilityCheck[] = partial.reliabilityChecks ?? [
+  const checks: Product["reliabilityChecks"] = partial.reliabilityChecks ?? [
     { label: "Цена не выше средней за 90 дней", status: "ok" },
     { label: "Продавец с высоким рейтингом", status: "ok" },
     { label: "Много подтверждённых покупок", status: rnd() > 0.3 ? "ok" : "warn" },
     { label: "Низкий риск подделки", status: "ok" },
     { label: "Доставка с отслеживанием", status: "ok" },
   ];
+  const rating = partial.rating ?? Math.round((4.2 + rnd() * 0.7) * 10) / 10;
+  const pos = 78 + Math.round(rnd() * 16);
+  const neg = 1 + Math.round(rnd() * 5);
   return {
     id,
     brand: partial.brand ?? "—",
     category: partial.category ?? "Подбор Aura",
     art: partial.art ?? "gadget",
     oldPrice: partial.oldPrice,
-    rating: partial.rating ?? Math.round((4.2 + rnd() * 0.7) * 10) / 10,
+    rating,
+    seller: partial.seller ?? SELLERS[Math.floor(rnd() * SELLERS.length)],
+    score: partial.score ?? Math.round(Math.min(9.7, rating + 0.3 + rnd() * 0.6) * 10) / 10,
+    sentiment: partial.sentiment ?? { pos, neu: 100 - pos - neg, neg },
     reviewsCount: partial.reviewsCount ?? Math.round(120 + rnd() * 2400),
     delivery: partial.delivery ?? "2–4 дня",
     warranty: partial.warranty ?? "Гарантия 1 год",

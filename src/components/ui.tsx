@@ -166,6 +166,82 @@ export function TypeBadge({ type }: { type: QueryType }) {
   );
 }
 
+/* ─────────── Кольцо оценки надёжности ─────────── */
+export function ScoreRing({ score, size = 92 }: { score: number; size?: number }) {
+  const r = 38;
+  const c = 2 * Math.PI * r;
+  const pct = Math.min(1, score / 10);
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
+        <circle cx="50" cy="50" r={r} fill="none" stroke="var(--line)" strokeWidth="9" />
+        <motion.circle
+          cx="50"
+          cy="50"
+          r={r}
+          fill="none"
+          stroke="var(--pine)"
+          strokeWidth="9"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          initial={{ strokeDashoffset: c }}
+          animate={{ strokeDashoffset: c * (1 - pct) }}
+          transition={{ type: "spring", stiffness: 60, damping: 16, delay: 0.25 }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <ScoreNum score={score} />
+        <span className="text-[9px] font-semibold uppercase tracking-wider text-faint">из 10</span>
+      </div>
+    </div>
+  );
+}
+
+function ScoreNum({ score }: { score: number }) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    let start: number | null = null;
+    const tick = (ts: number) => {
+      if (start === null) start = ts;
+      const p = Math.min(1, (ts - start) / 900);
+      setV(score * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [score]);
+  return <span className="font-display text-[20px] font-bold leading-none text-pine">{v.toFixed(1).replace(".", ",")}</span>;
+}
+
+/* ─────────── Индикатор цены относительно средней ─────────── */
+export function PriceGauge({ price, avg }: { price: number; avg: number }) {
+  // шкала от avg*0.88 до avg*1.12
+  const lo = avg * 0.88;
+  const hi = avg * 1.12;
+  const pos = Math.min(97, Math.max(3, ((price - lo) / (hi - lo)) * 100));
+  const cheaper = price <= avg;
+  return (
+    <div>
+      <div className="relative mt-1 h-2 rounded-full" style={{ background: "linear-gradient(90deg, color-mix(in srgb, var(--pine) 55%, transparent), var(--line) 50%, color-mix(in srgb, var(--warn) 55%, transparent))" }}>
+        <span className="absolute left-1/2 top-[-5px] h-4 w-px -translate-x-1/2 bg-faint/70" />
+        <motion.span
+          className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] shadow-md"
+          style={{ borderColor: "var(--card)", background: cheaper ? "var(--pine)" : "var(--warn)" }}
+          initial={{ left: "50%" }}
+          animate={{ left: `${pos}%` }}
+          transition={{ type: "spring", stiffness: 70, damping: 15, delay: 0.2 }}
+        />
+      </div>
+      <div className="mt-1.5 flex justify-between font-mono text-[10.5px] text-faint">
+        <span>выгодно</span>
+        <span>средняя</span>
+        <span>дорого</span>
+      </div>
+    </div>
+  );
+}
+
 /* ─────────── Заголовок с line-mask reveal ─────────── */
 export function MaskTitle({ text, className = "" }: { text: string; className?: string }) {
   return (

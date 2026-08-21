@@ -7,22 +7,38 @@ import {
   Clock,
   Gift,
   Info,
+  Link2,
   ListChecks,
   MapPin,
   MessageSquare,
+  Package,
   Phone,
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Store,
+  Timer,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { FALLBACK_EXAMPLES, resolveScenario } from "../data/scenarios";
+import { computeStats, FALLBACK_EXAMPLES, resolveScenario } from "../data/scenarios";
 import { fadeUp, spring, stagger } from "../lib/motion";
-import { fmtMoney, speed } from "../lib/utils";
-import type { ClarifyQuestion, CompanyOffer, Product, Scenario } from "../types";
-import { AuraChoiceBlock, BuyModal, Dashboards, ProductCard } from "./ProductBits";
+import { fmtMoney, parsePrice, speed, usePrefersReducedMotion } from "../lib/utils";
+import type { CompanyOffer, Product, Scenario } from "../types";
+import {
+  BuyModal,
+  ChoiceTile,
+  CompareModal,
+  CompareTile,
+  GaugeTile,
+  HistoryTile,
+  HonestTile,
+  ProductCard,
+  ReliabilityTile,
+  SentimentTile,
+  WhyTile,
+} from "./ProductBits";
 import { ProcessPanel } from "./ProcessPanel";
 import { ProductArt } from "./ProductArt";
 import { Collapsible, MaskTitle, Modal, Stars, TypeBadge } from "./ui";
@@ -51,14 +67,80 @@ function AuraSays({ text }: { text: string }) {
   );
 }
 
-/* ─────────── Сводка «Поняла задачу» для услуг ─────────── */
-function TaskSummary({
-  scenario,
-  answers,
-}: {
-  scenario: Scenario;
-  answers: Record<string, string>;
-}) {
+/* ─────────── Навигация по секциям выдачи ─────────── */
+function SectionNav({ ids }: { ids: { id: string; label: string }[] }) {
+  const [active, setActive] = useState(ids[0]?.id ?? "");
+  const reduced = usePrefersReducedMotion();
+  useEffect(() => {
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const vis = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (vis) setActive(vis.target.id);
+      },
+      { rootMargin: "-25% 0px -55% 0px" }
+    );
+    ids.forEach(({ id }) => {
+      const el = document.getElementById(id);
+      if (el) obs.observe(el);
+    });
+    return () => obs.disconnect();
+  }, [ids]);
+  return (
+    <nav
+      className="nice-scroll sticky top-[136px] z-20 -mx-4 flex gap-1.5 overflow-x-auto border-y border-line/70 bg-bg/85 px-4 py-2 backdrop-blur-md sm:top-[140px]"
+      aria-label="Разделы результата"
+    >
+      {ids.map(({ id, label }) => (
+        <button
+          key={id}
+          onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" })}
+          className={`shrink-0 rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors ${
+            active === id ? "bg-pine text-pine-fg" : "bg-card text-soft hover:text-ink border border-line"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/* ─────────── Итог поиска: что я сделала ─────────── */
+function SummaryStrip({ scenario, onShowProcess }: { scenario: Scenario; onShowProcess: () => void }) {
+  const s = computeStats(scenario.process);
+  const isService = scenario.type === "service_search";
+  const cells = [
+    { icon: Store, v: s.markets, label: isService ? "компаний" : "магазинов" },
+    { icon: Package, v: isService ? s.responses : s.offers, label: isService ? "ответов" : "предложений" },
+    { icon: Link2, v: s.pages, label: "страниц открыто" },
+    { icon: ShieldCheck, v: s.checks, label: "проверок" },
+    { icon: Timer, v: s.sec, label: "секунд", text: `~${s.sec}` },
+  ];
+  return (
+    <motion.section variants={fadeUp} id="itog" className="tile tile-static scroll-mt-44 overflow-hidden">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4">
+        <p className="label-caps">Что я сделала</p>
+        <div className="flex flex-1 flex-wrap items-center gap-x-6 gap-y-2">
+          {cells.map((c) => (
+            <span key={c.label} className="inline-flex items-center gap-2">
+              <c.icon size={15} className="text-pine" />
+              <b className="font-mono text-[15px]">{c.text ?? c.v}</b>
+              <span className="text-[12.5px] text-soft">{c.label}</span>
+            </span>
+          ))}
+        </div>
+        <button className="btn btn-ghost !px-3.5 !py-1.5 text-[12.5px]" onClick={onShowProcess}>
+          Как я это сделала
+        </button>
+      </div>
+    </motion.section>
+  );
+}
+
+/* ─────────── Сводка «Поняла задачу» ─────────── */
+function TaskSummary({ scenario, answers }: { scenario: Scenario; answers: Record<string, string> }) {
   const rows: { label: string; value: string }[] = [
     { label: "Услуга", value: scenario.label },
     ...scenario.questions
@@ -70,14 +152,14 @@ function TaskSummary({
     { label: "Город", value: "Ваш город" },
   ];
   return (
-    <motion.div variants={fadeUp} className="card p-5">
+    <motion.div variants={fadeUp} className="tile tile-static p-5 xl:col-span-2">
       <div className="mb-3 flex items-center gap-2.5">
         <span className="grid h-9 w-9 place-items-center rounded-xl bg-pine/10 text-pine">
           <ListChecks size={17} />
         </span>
         <div>
           <p className="font-semibold">Поняла задачу</p>
-          <p className="text-[12.5px] text-soft">Отправила её в проверенные компании</p>
+          <p className="text-[12.5px] text-soft">Отправила её в проверенные компании — регистрация не нужна</p>
         </div>
       </div>
       <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
@@ -88,25 +170,57 @@ function TaskSummary({
           </div>
         ))}
       </dl>
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {rows.map((r) => (
-          <span key={r.label} className="rounded-full bg-bg2 px-3 py-1 text-[12px] font-medium text-soft">
-            {r.value}
-          </span>
+    </motion.div>
+  );
+}
+
+/* ─────────── Сравнение цен компаний (бары) ─────────── */
+function PriceBarsTile({ companies }: { companies: CompanyOffer[] }) {
+  const vals = companies.map((c) => parsePrice(c.estimatedPrice));
+  const max = Math.max(...vals, 1);
+  return (
+    <motion.div variants={fadeUp} className="tile tile-static flex flex-col p-5">
+      <p className="label-caps mb-3">Предварительные цены</p>
+      <ul className="space-y-2.5">
+        {companies.map((c, i) => (
+          <li key={c.id}>
+            <div className="mb-1 flex justify-between gap-2 text-[12px]">
+              <span className={`truncate font-semibold ${c.recommended ? "text-pine" : ""}`}>{c.companyName}</span>
+              <span className="shrink-0 font-mono text-soft">{c.estimatedPrice}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-line/50">
+              <motion.div
+                className="h-full rounded-full"
+                style={{
+                  background: c.hiddenFeesWarning
+                    ? "var(--warn)"
+                    : c.recommended
+                      ? "var(--pine)"
+                      : "color-mix(in srgb, var(--faint) 55%, transparent)",
+                }}
+                initial={{ width: 0 }}
+                animate={{ width: `${(vals[i] / max) * 100}%` }}
+                transition={{ type: "spring", stiffness: 70, damping: 17, delay: 0.15 + i * 0.07 }}
+              />
+            </div>
+          </li>
         ))}
-      </div>
+      </ul>
+      <p className="mt-auto pt-3 text-[11.5px] leading-snug text-faint">
+        Жёлтым — компании, где вероятны доплаты сверх названной цены
+      </p>
     </motion.div>
   );
 }
 
 /* ─────────── Карточка компании ─────────── */
-function CompanyCard({ c, onSelect }: { c: CompanyOffer; onSelect: () => void }) {
+function CompanyCard({ c, wide = false, onSelect }: { c: CompanyOffer; wide?: boolean; onSelect: () => void }) {
   return (
     <motion.article
       variants={fadeUp}
       whileHover={{ y: -3 }}
       transition={spring}
-      className={`card relative flex flex-col p-5 ${c.recommended ? "border-pine/50 shadow-lg shadow-pine/10" : ""}`}
+      className={`tile relative flex flex-col p-5 ${wide ? "md:col-span-2 !border-pine/50 shadow-lg shadow-pine/10" : ""}`}
     >
       {c.recommended && (
         <span className="absolute -top-3 left-5 inline-flex items-center gap-1.5 rounded-full bg-pine px-3 py-1 text-[11.5px] font-bold text-pine-fg shadow">
@@ -114,7 +228,7 @@ function CompanyCard({ c, onSelect }: { c: CompanyOffer; onSelect: () => void })
           Рекомендация Aura
         </span>
       )}
-      <div className="mb-1 flex items-center justify-between gap-2">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-[16px] font-bold">{c.companyName}</h3>
         <Stars rating={c.rating} count={c.reviewsCount} />
       </div>
@@ -150,17 +264,14 @@ function CompanyCard({ c, onSelect }: { c: CompanyOffer; onSelect: () => void })
           </li>
         ))}
       </ul>
-      <button
-        className={`btn mt-4 ${c.recommended ? "btn-primary" : "btn-ghost"}`}
-        onClick={onSelect}
-      >
+      <button className={`btn mt-4 ${c.recommended ? "btn-primary" : "btn-ghost"}`} onClick={onSelect}>
         Выбрать
       </button>
     </motion.article>
   );
 }
 
-/* ─────────── Основной поток поиска ─────────── */
+/* ─────────── Основной поток ─────────── */
 function SearchFlow({ query }: { query: string }) {
   const scenario = useMemo(() => resolveScenario(query), [query]);
 
@@ -171,7 +282,8 @@ function SearchFlow({ query }: { query: string }) {
   const [activeStep, setActiveStep] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [buy, setBuy] = useState<{ p: Product; mode: "points" | "plain" } | null>(null);
-  const [chosen, setChosen] = useState<CompanyOffer | null>(null);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [chosenCompany, setChosenCompany] = useState<CompanyOffer | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
   const [contactSent, setContactSent] = useState(false);
 
@@ -194,12 +306,11 @@ function SearchFlow({ query }: { query: string }) {
     timers.current.push(
       window.setTimeout(() => {
         setPhase("done");
-        setCollapsed(true);
+        setCollapsed(true); // процесс схлопывается к итогу
       }, speed(acc + 750))
     );
   }, [scenario]);
 
-  // точный товар: стартуем сразу
   useEffect(() => {
     if (scenario && scenario.questions.length === 0) startProcess();
   }, [scenario, startProcess]);
@@ -208,26 +319,24 @@ function SearchFlow({ query }: { query: string }) {
     if (!scenario) return;
     setAnswers((a) => {
       const na = { ...a, [qid]: oid };
-      const allAnswered = scenario.questions.every((q) => na[q.id]);
-      if (allAnswered && !started.current) {
+      if (scenario.questions.every((q) => na[q.id]) && !started.current) {
         timers.current.push(window.setTimeout(() => startProcess(), speed(650)));
       }
       return na;
     });
   };
 
-  /* ── fallback: запрос не распознан ── */
+  /* ── fallback ── */
   if (!scenario) {
     return (
       <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-16">
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring} className="card p-7 text-center">
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring} className="tile tile-static p-7 text-center">
           <span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full bg-pine/10 text-pine">
             <MessageSquare size={22} />
           </span>
           <h1 className="font-display text-[20px] font-semibold">Пока не поняла, что именно ищем</h1>
           <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-soft">
-            Попробуйте написать чуть конкретнее: название товара, направление с бюджетом, кому подарок или какую услугу
-            нужно сделать.
+            Попробуйте чуть конкретнее: название товара, направление с бюджетом, кому подарок или какую услугу нужно сделать.
           </p>
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             {FALLBACK_EXAMPLES.map((e) => (
@@ -246,33 +355,40 @@ function SearchFlow({ query }: { query: string }) {
 
   const chosenProduct = scenario.products.find((p) => p.isAuraChoice) ?? scenario.products[0];
   const otherProducts = scenario.products.filter((p) => !p.isAuraChoice);
+  const minOther = otherProducts.length ? Math.min(...otherProducts.map((p) => p.price)) : undefined;
   const firstUnanswered = scenario.questions.findIndex((q) => !answers[q.id]);
-  const totalSec = Math.round(scenario.process.reduce((s, x) => s + x.duration, 0) / 1000);
+
+  const navIds =
+    scenario.type === "service_search"
+      ? [
+          { id: "itog", label: "Итог" },
+          { id: "task", label: "Задача" },
+          { id: "offers", label: "Предложения" },
+          { id: "attention", label: "Советы" },
+        ]
+      : [
+          { id: "itog", label: "Итог" },
+          { id: "choice", label: "Выбор Aura" },
+          { id: "options", label: "Варианты" },
+          { id: "analytics", label: "Аналитика" },
+        ];
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:py-8">
-      {/* шапка поиска */}
-      <header className="mb-6 flex flex-wrap items-center gap-3">
+      <header className="mb-5 flex flex-wrap items-center gap-3">
         <Link to="/" className="btn btn-ghost !p-2.5" aria-label="Вернуться на главную">
           <ArrowLeft size={17} />
         </Link>
         <TypeBadge type={scenario.type} />
-        <h1 className="font-display text-[18px] font-semibold sm:text-[22px]">
+        <h1 className="min-w-0 font-display text-[18px] font-semibold sm:text-[22px]">
           <MaskTitle text={query} />
         </h1>
       </header>
 
       <AnimatePresence mode="wait">
-        {/* ── ФАЗА: уточнение ── */}
+        {/* ── УТОЧНЕНИЕ ── */}
         {phase === "clarify" && (
-          <motion.section
-            key="clarify"
-            variants={stagger}
-            initial="hidden"
-            animate="show"
-            exit={{ opacity: 0, y: -12 }}
-            className="mx-auto max-w-3xl space-y-4"
-          >
+          <motion.section key="clarify" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -12 }} className="mx-auto max-w-3xl space-y-4">
             <AuraSays text={scenario.intro} />
             {scenario.questions.map((q, qi) => {
               const done = !!answers[q.id];
@@ -281,7 +397,7 @@ function SearchFlow({ query }: { query: string }) {
                 <motion.div
                   key={q.id}
                   variants={fadeUp}
-                  className={`card p-5 transition-all duration-300 ${!active && !done ? "opacity-45" : ""} ${active ? "border-pine/40 shadow-md shadow-pine/5" : ""}`}
+                  className={`tile tile-static p-5 transition-all duration-300 ${!active && !done ? "opacity-45" : ""} ${active ? "!border-pine/40 shadow-md shadow-pine/5" : ""}`}
                 >
                   <p className="label-caps mb-1">
                     Вопрос {qi + 1} из {scenario.questions.length}
@@ -315,64 +431,40 @@ function SearchFlow({ query }: { query: string }) {
           </motion.section>
         )}
 
-        {/* ── ФАЗА: работа ── */}
+        {/* ── РАБОТА ── */}
         {phase === "working" && (
-          <motion.section
-            key="working"
-            variants={stagger}
-            initial="hidden"
-            animate="show"
-            exit={{ opacity: 0, y: -12 }}
-            className="mx-auto max-w-3xl space-y-5"
-          >
+          <motion.section key="working" variants={stagger} initial="hidden" animate="show" exit={{ opacity: 0, y: -12 }} className="mx-auto max-w-3xl space-y-5">
             <AuraSays text={scenario.intro} />
             {scenario.type === "service_search" && <TaskSummary scenario={scenario} answers={answers} />}
-            <ProcessPanel
-              steps={scenario.process}
-              activeIndex={activeStep}
-              collapsed={collapsed}
-              onToggle={() => setCollapsed((c) => !c)}
-            />
-            {/* намёк на будущий результат */}
+            <ProcessPanel steps={scenario.process} activeIndex={activeStep} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
             <div className="space-y-3" aria-hidden>
-              <div className="card shimmer h-32" />
+              <div className="tile shimmer h-32" />
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="card shimmer h-24" />
-                <div className="card shimmer h-24" />
+                <div className="tile shimmer h-24" />
+                <div className="tile shimmer h-24" />
               </div>
             </div>
           </motion.section>
         )}
 
-        {/* ── ФАЗА: результат ── */}
+        {/* ── РЕЗУЛЬТАТ ── */}
         {phase === "done" && (
-          <motion.section
-            key="done"
-            variants={stagger}
-            initial="hidden"
-            animate="show"
-            className="space-y-8"
-          >
-            <ProcessPanel
-              steps={scenario.process}
-              activeIndex={activeStep}
-              collapsed={collapsed}
-              onToggle={() => setCollapsed((c) => !c)}
-            />
+          <motion.section key="done" variants={stagger} initial="hidden" animate="show" className="space-y-6">
+            <ProcessPanel steps={scenario.process} activeIndex={activeStep} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+            <SectionNav ids={navIds} />
 
-            <motion.div variants={fadeUp} className="flex flex-wrap items-center justify-between gap-2">
-              <p className="label-caps !text-[12px]">
-                Готово · {scenario.process.length} шагов · ~{totalSec} сек · поиск бесплатный
-              </p>
+            <SummaryStrip scenario={scenario} onShowProcess={() => { setCollapsed(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+
+            <motion.div variants={fadeUp} className="flex justify-end">
               <button
                 className="btn btn-ghost !px-3.5 !py-2 text-[13px]"
                 onClick={() => {
                   started.current = false;
                   setAnswers({});
-                  setChosen(null);
+                  setChosenCompany(null);
                   setContactSent(false);
-                  setPhase(scenario.questions.length ? "clarify" : "working");
                   setActiveStep(0);
+                  setPhase(scenario.questions.length ? "clarify" : "working");
                   if (scenario.questions.length === 0) startProcess();
                   else setCollapsed(false);
                 }}
@@ -382,96 +474,112 @@ function SearchFlow({ query }: { query: string }) {
               </button>
             </motion.div>
 
-            {/* ТОВАРЫ / КАТЕГОРИЯ */}
-            {(scenario.type === "exact_product" || scenario.type === "category_search") && chosenProduct && (
-              <div className="space-y-8">
-                <AuraChoiceBlock product={chosenProduct} onBuy={(mode) => setBuy({ p: chosenProduct, mode })} />
-                <motion.div variants={fadeUp}>
-                  <h2 className="mb-4 flex items-baseline gap-2 font-display text-[18px] font-semibold">
-                    Ещё варианты
-                    <span className="text-[13px] font-medium text-faint">{otherProducts.length}</span>
-                  </h2>
-                  <motion.div
-                    variants={stagger}
-                    initial="hidden"
-                    animate="show"
-                    className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
-                  >
-                    {otherProducts.map((p) => (
-                      <ProductCard key={p.id} product={p} onBuy={(prod) => setBuy({ p: prod, mode: "plain" })} />
-                    ))}
-                  </motion.div>
-                </motion.div>
-                <motion.div variants={fadeUp} className="mx-auto max-w-3xl space-y-3">
-                  <p className="label-caps text-center">Подробнее — по желанию</p>
-                  <Dashboards product={chosenProduct} all={scenario.products} />
-                </motion.div>
-              </div>
-            )}
+            {/* ═══ ТОВАРЫ / КАТЕГОРИЯ / ПОДАРОК ═══ */}
+            {scenario.type !== "service_search" && chosenProduct && (
+              <>
+                {scenario.type === "gift_search" && (
+                  <AuraSays text="Вот что я подобрала: главное направление — и ещё несколько идей рядом, чтобы точно попасть в настроение." />
+                )}
 
-            {/* ПОДАРОК */}
-            {scenario.type === "gift_search" && chosenProduct && (
-              <div className="space-y-8">
-                <AuraSays text="Вот что я подобрала: одно главное направление и ещё несколько идей рядом — чтобы точно попасть в настроение." />
-                <AuraChoiceBlock product={chosenProduct} onBuy={(mode) => setBuy({ p: chosenProduct, mode })} />
-                <motion.div variants={fadeUp} className="grid gap-4 lg:grid-cols-3">
-                  {scenario.giftDirections.map((d) => (
-                    <motion.article key={d.title} variants={fadeUp} whileHover={{ y: -4 }} transition={spring} className="card flex flex-col p-5">
-                      <span className="mb-2 inline-flex items-center gap-1.5 text-pine">
-                        <Gift size={15} />
-                        <span className="label-caps !text-pine">Направление</span>
-                      </span>
-                      <h3 className="font-display text-[17px] font-semibold leading-snug">{d.title}</h3>
-                      <p className="mt-1 text-[13px] leading-relaxed text-soft">{d.subtitle}</p>
-                      <div className="mt-4 flex items-center gap-3 rounded-2xl border border-line bg-bg2/50 p-3">
-                        <ProductArt art={d.main.art} seedText={d.main.id} className="h-16 w-16 shrink-0 rounded-xl" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13.5px] font-semibold">{d.main.title}</p>
-                          <p className="text-[14px] font-bold text-pine">{fmtMoney(d.main.price)}</p>
-                          <Stars rating={d.main.rating} />
-                        </div>
-                        <button className="btn btn-ghost !px-3 !py-1.5 text-[12.5px]" onClick={() => setBuy({ p: d.main, mode: "plain" })}>
-                          Купить
-                        </button>
-                      </div>
-                      <ul className="mt-3 space-y-2">
-                        {d.alternatives.map((a) => (
-                          <li key={a.id} className="flex items-center justify-between gap-2 text-[13px]">
-                            <span className="truncate text-soft">{a.title}</span>
-                            <button className="shrink-0 font-semibold text-pine hover:underline" onClick={() => setBuy({ p: a, mode: "plain" })}>
-                              {fmtMoney(a.price)}
+                <section id="choice" className="scroll-mt-44 space-y-3">
+                  <h2 className="label-caps !text-[12px]">Главный результат</h2>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <ChoiceTile product={chosenProduct} onBuy={(mode: "points" | "plain") => setBuy({ p: chosenProduct, mode })} />
+                    <HonestTile product={chosenProduct} minOther={minOther} />
+                    <ReliabilityTile product={chosenProduct} />
+                  </div>
+                </section>
+
+                {scenario.type === "gift_search" && (
+                  <section className="space-y-3">
+                    <h2 className="flex items-center gap-2 font-display text-[17px] font-semibold">
+                      <Gift size={17} className="text-pine" />
+                      Ещё направления подарков
+                    </h2>
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      {scenario.giftDirections.map((d) => (
+                        <motion.article key={d.title} variants={fadeUp} whileHover={{ y: -4 }} transition={spring} className="tile flex flex-col p-5">
+                          <span className="mb-2 inline-flex items-center gap-1.5 text-pine">
+                            <Gift size={14} />
+                            <span className="label-caps !text-pine">Направление</span>
+                          </span>
+                          <h3 className="font-display text-[16px] font-semibold leading-snug">{d.title}</h3>
+                          <p className="mt-1 text-[12.5px] leading-relaxed text-soft">{d.subtitle}</p>
+                          <div className="mt-4 flex items-center gap-3 rounded-2xl border border-line bg-bg2/50 p-3">
+                            <ProductArt art={d.main.art} seedText={d.main.id} className="h-16 w-16 shrink-0 rounded-xl" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-[13.5px] font-semibold">{d.main.title}</p>
+                              <p className="font-display text-[15px] font-bold text-pine">{fmtMoney(d.main.price)}</p>
+                              <Stars rating={d.main.rating} />
+                            </div>
+                            <button className="btn btn-ghost !px-3 !py-1.5 text-[12.5px]" onClick={() => setBuy({ p: d.main, mode: "plain" })}>
+                              Купить
                             </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </motion.article>
-                  ))}
-                </motion.div>
-                <motion.div variants={fadeUp} className="mx-auto max-w-3xl space-y-3">
-                  <p className="label-caps text-center">Подробнее — по желанию</p>
-                  <Dashboards product={chosenProduct} all={scenario.products} />
-                </motion.div>
-              </div>
+                          </div>
+                          <ul className="mt-3 space-y-2">
+                            {d.alternatives.map((a) => (
+                              <li key={a.id} className="flex items-center justify-between gap-2 text-[13px]">
+                                <span className="truncate text-soft">{a.title}</span>
+                                <button className="shrink-0 font-mono font-semibold text-pine hover:underline" onClick={() => setBuy({ p: a, mode: "plain" })}>
+                                  {fmtMoney(a.price)}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </motion.article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {otherProducts.length > 0 && (
+                  <section id="options" className="scroll-mt-44 space-y-3">
+                    <h2 className="flex items-baseline gap-2 font-display text-[17px] font-semibold">
+                      Ещё варианты
+                      <span className="text-[13px] font-medium text-faint">{otherProducts.length}</span>
+                    </h2>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {otherProducts.map((p) => (
+                        <ProductCard key={p.id} product={p} onBuy={(prod) => setBuy({ p: prod, mode: "plain" })} />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                <section id="analytics" className="scroll-mt-44 space-y-3">
+                  <h2 className="label-caps !text-[12px]">Аналитика — всё под рукой</h2>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <GaugeTile product={chosenProduct} />
+                    <HistoryTile product={chosenProduct} />
+                    <SentimentTile product={chosenProduct} />
+                    <WhyTile product={chosenProduct} />
+                    <CompareTile all={scenario.products} onOpen={() => setCompareOpen(true)} />
+                  </div>
+                </section>
+              </>
             )}
 
-            {/* УСЛУГА */}
+            {/* ═══ УСЛУГА ═══ */}
             {scenario.type === "service_search" && (
-              <div className="space-y-8">
-                <TaskSummary scenario={scenario} answers={answers} />
+              <>
+                <section id="task" className="scroll-mt-44 grid gap-4 xl:grid-cols-3">
+                  <TaskSummary scenario={scenario} answers={answers} />
+                  <PriceBarsTile companies={scenario.companies} />
+                </section>
 
-                <motion.div variants={fadeUp}>
-                  <h2 className="mb-4 flex items-baseline gap-2 font-display text-[18px] font-semibold">
+                <section id="offers" className="scroll-mt-44 space-y-3">
+                  <h2 className="flex items-baseline gap-2 font-display text-[17px] font-semibold">
                     Ответы компаний
                     <span className="text-[13px] font-medium text-faint">{scenario.companies.length}</span>
                   </h2>
-                  <motion.div variants={stagger} initial="hidden" animate="show" className="grid gap-4 pt-2 md:grid-cols-2">
+                  <div className="grid gap-4 pt-2 md:grid-cols-2 xl:grid-cols-3">
                     {scenario.companies.map((c) => (
-                      <CompanyCard key={c.id} c={c} onSelect={() => setChosen(c)} />
+                      <CompanyCard key={c.id} c={c} wide={c.recommended} onSelect={() => setChosenCompany(c)} />
                     ))}
-                  </motion.div>
-                </motion.div>
+                  </div>
+                </section>
 
-                <motion.div variants={fadeUp} className="mx-auto max-w-3xl">
+                <section id="attention" className="scroll-mt-44 mx-auto max-w-3xl">
                   <Collapsible icon={ShieldCheck} title="На что обратить внимание" hint="Честные мелочи, о которых часто забывают">
                     <ul className="space-y-2">
                       {scenario.attentionNotes.map((n) => (
@@ -482,11 +590,10 @@ function SearchFlow({ query }: { query: string }) {
                       ))}
                     </ul>
                   </Collapsible>
-                </motion.div>
+                </section>
 
-                {/* выбор подрядчика */}
                 <AnimatePresence>
-                  {chosen && (
+                  {chosenCompany && (
                     <motion.div
                       key="chosen"
                       initial={{ opacity: 0, y: 20 }}
@@ -495,21 +602,21 @@ function SearchFlow({ query }: { query: string }) {
                       transition={spring}
                       className="mx-auto max-w-2xl"
                     >
-                      <div className="card border-pine/50 p-6 text-center shadow-lg shadow-pine/10">
+                      <div className="tile !border-pine/50 p-6 text-center shadow-lg shadow-pine/10">
                         <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-pine/12 text-pine">
                           <CheckCircle2 size={22} />
                         </span>
-                        <h3 className="font-display text-[19px] font-semibold">Вы выбрали «{chosen.companyName}»</h3>
+                        <h3 className="font-display text-[19px] font-semibold">Вы выбрали «{chosenCompany.companyName}»</h3>
                         <p className="mx-auto mt-2 max-w-md text-[13.5px] leading-relaxed text-soft">
-                          Контакты компании откроются после подтверждения заявки. Это бесплатно: вы просто соглашаетесь
-                          на звонок или сообщение от исполнителя.
+                          Контакты откроются после подтверждения заявки. Это бесплатно: вы просто соглашаетесь на звонок
+                          или сообщение от исполнителя.
                         </p>
                         <div className="mt-4 flex flex-col justify-center gap-2 sm:flex-row">
                           <button className="btn btn-primary" onClick={() => setContactOpen(true)}>
                             <Phone size={16} />
                             Открыть контакт
                           </button>
-                          <button className="btn btn-ghost" onClick={() => setChosen(null)}>
+                          <button className="btn btn-ghost" onClick={() => setChosenCompany(null)}>
                             Выбрать другую
                           </button>
                         </div>
@@ -517,20 +624,20 @@ function SearchFlow({ query }: { query: string }) {
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
+              </>
             )}
 
             <motion.p variants={fadeUp} className="pb-4 text-center text-[12px] text-faint">
-              Цены, рейтинги и баллы в демо — иллюстративные данные · баллы — бесплатный бонус
+              Демо-данные: цены, магазины и баллы иллюстративные · баллы — бесплатный бонус, они не меняют цену
             </motion.p>
           </motion.section>
         )}
       </AnimatePresence>
 
-      {/* модалка покупки */}
       <BuyModal product={buy?.p ?? null} mode={buy?.mode ?? "plain"} open={!!buy} onClose={() => setBuy(null)} />
+      <CompareModal all={scenario.products} open={compareOpen} onClose={() => setCompareOpen(false)} />
 
-      {/* модалка контакта (услуги, демо) */}
+      {/* контакт (услуги, демо) */}
       <Modal open={contactOpen} onClose={() => setContactOpen(false)} width={440}>
         <div className="p-6 sm:p-7">
           {contactSent ? (
@@ -540,7 +647,7 @@ function SearchFlow({ query }: { query: string }) {
               </span>
               <h3 className="font-display text-[18px] font-semibold">Заявка отправлена (демо)</h3>
               <p className="mx-auto mt-2 max-w-sm text-[13.5px] leading-relaxed text-soft">
-                В полной версии «{chosen?.companyName}» свяжется с вами в рабочее время. А пока — это демонстрация,
+                В полной версии «{chosenCompany?.companyName}» свяжется с вами в рабочее время. А пока это демонстрация —
                 никто никуда не звонит.
               </p>
               <button className="btn btn-primary mx-auto mt-5" onClick={() => { setContactOpen(false); setContactSent(false); }}>
@@ -553,11 +660,11 @@ function SearchFlow({ query }: { query: string }) {
                 <AlertTriangle size={16} />
                 <span className="text-[13px] font-semibold">Демо-режим</span>
               </div>
-              <h3 className="font-display text-[18px] font-semibold">Контакт «{chosen?.companyName}»</h3>
+              <h3 className="font-display text-[18px] font-semibold">Контакт «{chosenCompany?.companyName}»</h3>
               <p className="mt-2 text-[13.5px] leading-relaxed text-soft">
                 В демо-режиме контакт открывается условно: без реальных звонков и без передачи ваших данных.
               </p>
-              <p className="mt-4 rounded-2xl bg-bg2 px-4 py-3 text-center font-display text-[19px] font-bold tracking-wide">
+              <p className="mt-4 rounded-2xl bg-bg2 px-4 py-3 text-center font-mono text-[19px] font-bold tracking-wide">
                 +7 900 000-00-00
               </p>
               <form
