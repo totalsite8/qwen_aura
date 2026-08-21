@@ -1,6 +1,6 @@
 import { Coins } from "lucide-react";
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { ThemeToggle } from "../features/theme/ThemeToggle";
 import { useWalletStore } from "../features/wallet/walletStore";
 import { fmtNum, plural } from "../lib/utils";
@@ -40,6 +40,25 @@ export function Layout({ children }: { children: ReactNode }) {
             <span className="label-caps mt-1 hidden !text-[10px] sm:block">умный поиск</span>
           </Link>
           <div className="flex items-center gap-2.5">
+            <nav className="hidden items-center gap-1 rounded-full border border-line bg-card/70 p-1 md:flex" aria-label="Основная навигация">
+              {[
+                { to: "/", label: "Поиск" },
+                { to: "/wallet", label: "Баллы" },
+              ].map((l) => (
+                <NavLink
+                  key={l.to}
+                  to={l.to}
+                  end={l.to === "/"}
+                  className={({ isActive }) =>
+                    `rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+                      isActive ? "bg-pine/12 text-pine" : "text-soft hover:text-ink"
+                    }`
+                  }
+                >
+                  {l.label}
+                </NavLink>
+              ))}
+            </nav>
             <ThemeToggle />
             <Link
               to="/wallet"

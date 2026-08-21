@@ -19,6 +19,28 @@ export type ArtKind =
   | "tool"
   | "gadget";
 
+/** Живая активность внутри шага процесса — «настоящий веб-поиск» */
+export type FeedKind = "query" | "market" | "link" | "compare" | "check" | "stat";
+
+export interface FeedItem {
+  kind: FeedKind;
+  text: string;
+  detail?: string;
+  /** для market: найдено предложений; для compare: рейтинг/счёт */
+  count?: number;
+  /** для link: адреса, которые Aura «открывает» */
+  urls?: string[];
+}
+
+export interface ProcessStep {
+  id: string;
+  icon: LucideIcon;
+  text: string;
+  /** длительность в мс при обычной скорости */
+  duration: number;
+  feeds: FeedItem[];
+}
+
 export interface Product {
   id: string;
   title: string;
@@ -31,6 +53,7 @@ export interface Product {
   reviewsCount: number;
   delivery: string;
   warranty: string;
+  /** баллы — бесплатный бонус за покупку, НЕ вычитаются из цены */
   points: number;
   features: string[];
   whySelected: string[];
@@ -38,11 +61,9 @@ export interface Product {
   marketAverage: number;
   reliabilityChecks: { label: string; status: "ok" | "warn" }[];
   isAuraChoice: boolean;
-}
-
-export interface ReliabilityCheck {
-  label: string;
-  status: "ok" | "warn";
+  seller: string;
+  score: number;
+  sentiment: { pos: number; neu: number; neg: number };
 }
 
 export interface CompanyOffer {
@@ -59,16 +80,6 @@ export interface CompanyOffer {
   recommended: boolean;
 }
 
-export type StepState = "pending" | "active" | "done";
-
-export interface ProcessStep {
-  id: string;
-  icon: LucideIcon;
-  text: string;
-  /** длительность в мс при обычной скорости */
-  duration: number;
-}
-
 export interface QuestionOption {
   id: string;
   label: string;
@@ -77,7 +88,6 @@ export interface QuestionOption {
 export interface ClarifyQuestion {
   id: string;
   title: string;
-  /** подпись строки в сводке «Поняла задачу»; если null — в сводку не попадает */
   summaryLabel: string | null;
   options: QuestionOption[];
 }
@@ -91,17 +101,14 @@ export interface GiftDirection {
 
 export interface Scenario {
   type: QueryType;
-  /** человекочитаемое название сценария */
   label: string;
   questions: ClarifyQuestion[];
   process: ProcessStep[];
   products: Product[];
   giftDirections: GiftDirection[];
-  /** строки карточки «Поняла задачу» (услуги) */
   taskSummary: { label: string; value: string }[];
   companies: CompanyOffer[];
   attentionNotes: string[];
-  /** короткая реплика Aura перед стартом */
   intro: string;
 }
 

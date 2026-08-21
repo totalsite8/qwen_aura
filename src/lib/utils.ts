@@ -126,3 +126,38 @@ export function useCountUp(target: number, duration = 900, delay = 0) {
 export function usePrefersReducedMotion() {
   return useReducedMotion() ?? false;
 }
+
+/** Печатает текст посимвольно — для живой строки поиска в процессе */
+export function useTyped(text: string, play: boolean, cps = 42) {
+  const reduced = useReducedMotion();
+  const [len, setLen] = useState(() => (reduced || isFastMode() || !play ? text.length : 0));
+  useEffect(() => {
+    if (!play) {
+      setLen(text.length);
+      return;
+    }
+    if (reduced || isFastMode()) {
+      setLen(text.length);
+      return;
+    }
+    setLen(0);
+    const iv = window.setInterval(() => {
+      setLen((l) => {
+        if (l >= text.length) {
+          window.clearInterval(iv);
+          return l;
+        }
+        return l + 1;
+      });
+    }, 1000 / cps);
+    return () => window.clearInterval(iv);
+  }, [text, play, reduced, cps]);
+  return text.slice(0, len);
+}
+
+/** Достаёт первое число из строки цены: «68 000–84 000 ₽» → 68000 */
+export function parsePrice(s: string): number {
+  const flat = s.replace(/(\d)\s(\d)/g, "$1$2").replace(/(\d)\s(\d)/g, "$1$2");
+  const m = flat.match(/\d+/);
+  return m ? parseInt(m[0], 10) : 0;
+}

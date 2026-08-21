@@ -65,7 +65,7 @@ export function WalletPage() {
           <ul className="mt-4 grid gap-2.5 sm:grid-cols-3">
             {[
               { icon: Sparkles, text: "Начисляются как бонус за покупки через Aura" },
-              { icon: Coins, text: "Снижают реальную цену — видно в «Честном расчёте»" },
+              { icon: Coins, text: "Начисляются сверх цены после покупки — это бонус, а не скидка" },
               { icon: BadgeCheck, text: "Поиск при этом всегда остаётся бесплатным" },
             ].map(({ icon: Icon, text }) => (
               <li key={text} className="flex items-start gap-2.5 rounded-2xl bg-bg2/60 p-3.5 text-[13px] leading-snug text-soft">

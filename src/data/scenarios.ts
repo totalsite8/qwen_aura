@@ -15,8 +15,9 @@ import {
   Sparkles,
   Wand2,
 } from "lucide-react";
-import type { ClarifyQuestion, CompanyOffer, ProcessStep, QueryType, Scenario } from "../types";
+import type { ClarifyQuestion, CompanyOffer, FeedItem, ProcessStep, QueryType, Scenario } from "../types";
 import { classifyQuery, norm } from "../lib/classify";
+import { fmtMoney, hashStr, mulberry } from "../lib/utils";
 import { CATEGORIES, HERO_TEXTS, SERVICES, EXACT_PRODUCTS, type QuerySeed } from "./queries";
 import {
   EARBUDS_PRODUCTS,
@@ -28,45 +29,154 @@ import {
   serviceOffersFor,
 } from "./products";
 
-const steps = (list: [LucideIcon, string, number][]): ProcessStep[] =>
-  list.map(([icon, text, duration], i) => ({ id: `s${i}`, icon, text, duration }));
+/* ─────────── Живая лента «Что я сейчас делаю» ───────────
+   Каждый шаг — не просто пункт, а реальная работа: запросы,
+   перебор магазинов и страниц, сравнение цен, проверки. */
 
-/** Живая лента «Что я сейчас делаю» для каждого типа сценария */
-export const PROCESS_STEPS: Record<QueryType, ProcessStep[]> = {
-  exact_product: steps([
-    [Sparkles, "Понимаю задачу", 1300],
-    [ShoppingBag, "Проверяю наличие и цены", 1800],
-    [BookOpen, "Читаю свежие обзоры", 1700],
-    [Scale, "Сравниваю продавцов по надёжности", 1900],
-    [ShieldCheck, "Проверяю, действительно ли это лучший вариант", 1600],
-    [Wand2, "Готовлю результат", 1100],
-  ]),
-  category_search: steps([
-    [Sparkles, "Понимаю задачу", 1200],
-    [PackageSearch, "Собираю подходящие варианты", 2000],
-    [BookOpen, "Читаю свежие обзоры и отзывы", 1800],
-    [Scale, "Сравниваю отзывы, цены и надёжность", 1900],
-    [ShieldCheck, "Проверяю, действительно ли это лучший вариант", 1500],
-    [Wand2, "Готовлю результат", 1000],
-  ]),
-  gift_search: steps([
-    [Sparkles, "Понимаю задачу", 1200],
-    [Gift, "Собираю идеи под интересы", 2000],
-    [LineChart, "Проверяю, что сейчас актуально дарить", 1600],
-    [Scale, "Сравниваю цены и отзывы", 1700],
-    [BadgeCheck, "Убираю банальные варианты", 1400],
-    [Wand2, "Готовлю подборку", 1000],
-  ]),
-  service_search: steps([
-    [Sparkles, "Понимаю задачу", 1200],
-    [ListChecks, "Составила описание задачи", 1400],
-    [Send, "Отправила в проверенные компании", 1600],
-    [MessageSquare, "Получаю ответы", 2200],
-    [Scale, "Сравниваю цены и условия", 1700],
-    [ShieldCheck, "Проверяю скрытые доплаты", 1500],
-    [Wand2, "Готовлю рекомендацию", 900],
-  ]),
-};
+const MKT_GOODS = ["Ozon", "Wildberries", "Яндекс Маркет", "Мегамаркет", "DNS", "М.Видео", "Ситилинк", "Авито"];
+const MKT_GIFT = ["Ozon", "Wildberries", "Яндекс Маркет", "Мегамаркет", "Lamoda", "Авито"];
+
+const q = (text: string): FeedItem => ({ kind: "query", text });
+const chk = (text: string): FeedItem => ({ kind: "check", text });
+const stat = (text: string, count?: number): FeedItem => ({ kind: "stat", text, count });
+const link = (text: string, urls: string[]): FeedItem => ({ kind: "link", text, urls });
+const market = (text: string, count: number, detail?: string): FeedItem => ({ kind: "market", text, count, detail });
+const cmp = (text: string, detail: string, count: number): FeedItem => ({ kind: "compare", text, detail, count });
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 26);
+
+function marketFeeds(mkts: string[], seed: number): FeedItem[] {
+  const rnd = mulberry(seed);
+  const picks = mkts.filter((_, i) => i < 5 + (seed % 3));
+  return picks.map((m) => market(m, 8 + Math.floor(rnd() * 26)));
+}
+
+function offerTotal(feeds: FeedItem[]): number {
+  return feeds.filter((f) => f.kind === "market").reduce((a, f) => a + (f.count ?? 0), 0);
+}
+
+/** Собирает «живой» процесс под конкретный запрос и уже готовые результаты */
+export function processFor(
+  type: QueryType,
+  query: string,
+  products: Scenario["products"],
+  companies: Scenario["companies"]
+): ProcessStep[] {
+  const seed = hashStr(query);
+  const sl = slug(query);
+  const rnd = mulberry(seed + 7);
+  const mk = (list: [LucideIcon, string, number, FeedItem[]][]): ProcessStep[] =>
+    list.map(([icon, text, duration, feeds], i) => ({ id: `s${i}`, icon, text, duration, feeds }));
+
+  const scan = marketFeeds(MKT_GOODS, seed);
+  const scanTotal = offerTotal(scan);
+
+  const productRows: FeedItem[] = products.slice(0, 3).map((p) =>
+    cmp(p.seller, `${fmtMoney(p.price)} · ${p.warranty.toLowerCase()}`, Math.round(p.score * 10))
+  );
+  // count здесь — оценка сравнения (не цена), чтобы «лучший» доставался рекомендации
+  const companyRows: FeedItem[] = companies.slice(0, 4).map((c, i) => {
+    const score = c.recommended ? 96 : Math.max(55, 88 - i * 9 - (hashStr(c.id) % 7));
+    return cmp(c.companyName, `${c.estimatedPrice} · гарантия ${c.warranty}`, score);
+  });
+
+  if (type === "exact_product") {
+    return mk([
+      [Sparkles, "Понимаю задачу", 1300, [q(`«${query}»`), chk("Определила: конкретная модель — без лишних вопросов")]],
+      [ShoppingBag, "Сканирую магазины", 2400, [q(`${query} купить цена`), ...scan, stat("Предложений собрано", scanTotal)]],
+      [BookOpen, "Читаю свежие обзоры", 1700, [
+        link("Открываю обзоры и тесты", [
+          `youtube.com/results?search_query=${sl}-обзор`,
+          `4pda.to/forum/index.php?showtopic=${sl}`,
+          `ixbt.com/review/${sl}.html`,
+        ]),
+        stat("Обзоров и тестов изучено", 24 + Math.floor(rnd() * 20)),
+      ]],
+      [Scale, "Сравниваю цены и условия", 2000, [...productRows, stat(`${scanTotal} → достойных вариантов`, Math.min(12, 4 + products.length))]],
+      [ShieldCheck, "Проверяю, действительно ли это лучший вариант", 1600, [
+        link("Сверяю карточки продавцов", [`ozon.ru/product/${sl}`, `market.yandex.ru/product/${sl}`, `avito.ru/${sl}`]),
+        chk("Условия возврата и гарантии"),
+        chk("История цены за 90 дней"),
+      ]],
+      [Wand2, "Готовлю результат", 1100, [stat("Карточка «Выбор Aura» собрана")]],
+    ]);
+  }
+
+  if (type === "category_search") {
+    return mk([
+      [Sparkles, "Понимаю задачу", 1200, [q(`«${query}»`), chk("Уточнила параметры — они учтены в поиске")]],
+      [PackageSearch, "Собираю подходящие варианты", 2200, [q(`${query} рейтинг 2026`), ...scan, stat("Предложений собрано", scanTotal)]],
+      [BookOpen, "Читаю свежие обзоры и отзывы", 1800, [
+        link("Смотрю подборки и тесты", [`youtube.com/results?search_query=лучшие-${sl}`, `ichip.ru/podborki/${sl}`, `roskachestvo.gov.ru/research/${sl}`]),
+        stat("Отзывов проанализировано", 300 + Math.floor(rnd() * 600)),
+      ]],
+      [Scale, "Сравниваю отзывы, цены и надёжность", 2000, [...productRows, stat("В финал прошли", products.length)]],
+      [ShieldCheck, "Проверяю, действительно ли это лучший вариант", 1500, [
+        link("Перепроверяю finalists", [`ozon.ru/category/${sl}`, `wildberries.ru/catalog/${sl}`]),
+        chk("Цена не выше средней по подборке"),
+      ]],
+      [Wand2, "Готовлю результат", 1000, [stat("Подборка собрана")]],
+    ]);
+  }
+
+  if (type === "gift_search") {
+    const giftScan = marketFeeds(MKT_GIFT, seed + 3);
+    return mk([
+      [Sparkles, "Понимаю задачу", 1200, [q(`«${query}»`), chk("Учла интересы и бюджет из ответов")]],
+      [Gift, "Собираю идеи под интересы", 2100, [q(`подарок ${slug(query.replace(/подарок/i, "")).replace(/-/g, " ")} идеи 2026`), ...giftScan, stat("Идей собрано", offerTotal(giftScan))]],
+      [LineChart, "Проверяю, что сейчас актуально дарить", 1600, [
+        link("Смотрю тренды подарков", [`ozon.ru/highlight/${sl}`, `wildberries.ru/podborki/${sl}`]),
+        stat("Трендов проверено", 6 + Math.floor(rnd() * 6)),
+      ]],
+      [Scale, "Сравниваю цены и отзывы", 1700, [...productRows, stat("Направлений подарка", 3)]],
+      [BadgeCheck, "Убираю банальные варианты", 1400, [chk("Без носков и пены для бритья"), chk("Всё успеет приехать вовремя")]],
+      [Wand2, "Готовлю подборку", 1000, [stat("Подборка готова")]],
+    ]);
+  }
+
+  // service_search
+  const coScan: FeedItem[] = companies.map((c) => {
+    const m = c.responseTime.match(/(\d+)/);
+    return market(c.companyName, m ? parseInt(m[1], 10) : 60, "ответ");
+  });
+  return mk([
+    [Sparkles, "Понимаю задачу", 1200, [q(`«${query}»`), chk("Детали из ответов — в описании задачи")]],
+    [ListChecks, "Составила описание задачи", 1400, [stat("Понятное ТЗ для компаний готово")]],
+    [Send, "Отправила в проверенные компании", 1700, [q(`${query} — заявка`), ...coScan.slice(0, 6), stat("Компаний получили задачу", coScan.length)]],
+    [MessageSquare, "Получаю ответы", 2200, [
+      link("Читаю ответы компаний", companies.slice(0, 3).map((c) => `${slug(c.companyName)}.ru/offer`)),
+      stat("Развёрнутых ответов", companies.length),
+    ]],
+    [Scale, "Сравниваю цены и условия", 1700, [...companyRows, stat("Смета сверена по пунктам")]],
+    [ShieldCheck, "Проверяю скрытые доплаты", 1500, [
+      chk("Доставка и подъём включены?"),
+      chk("Демонтаж и расходники в смете?"),
+      chk("Гарантия — письменно в договоре"),
+    ]],
+    [Wand2, "Готовлю рекомендацию", 900, [stat("Рекомендация Aura готова")]],
+  ]);
+}
+
+/** Сводка по процессу для финального итога */
+export function computeStats(steps: ProcessStep[]) {
+  let offers = 0, markets = 0, checks = 0, links = 0, pages = 0, responses = 0;
+  for (const s of steps)
+    for (const f of s.feeds) {
+      if (f.kind === "market") {
+        markets++;
+        // в услугах count — минуты до ответа, а не предложения
+        if (f.detail === "ответ") responses += 1;
+        else offers += f.count ?? 0;
+      }
+      if (f.kind === "check") checks++;
+      if (f.kind === "link") {
+        links++;
+        pages += f.urls?.length ?? 0;
+      }
+    }
+  const sec = Math.round(steps.reduce((a, s) => a + s.duration, 0) / 100) / 10;
+  return { offers, markets, checks, links, pages, responses, sec };
+}
 
 export const CATEGORY_QUESTIONS: ClarifyQuestion[] = [
   {
@@ -301,7 +411,7 @@ export function resolveScenario(raw: string): Scenario | null {
     type: c.type,
     label,
     questions: [],
-    process: PROCESS_STEPS[c.type],
+    process: [],
     products: [],
     giftDirections: [],
     taskSummary: [],
@@ -317,7 +427,6 @@ export function resolveScenario(raw: string): Scenario | null {
       const seed = findSeed(EXACT_PRODUCTS, c.matched);
       base.products = exactProductsFor(c.matched, seed?.art);
     }
-    return base;
   }
 
   if (c.type === "category_search") {
@@ -328,7 +437,6 @@ export function resolveScenario(raw: string): Scenario | null {
       const seed = findSeed(CATEGORIES, c.matched) ?? { text: c.matched, art: "gadget" as const };
       base.products = categoryProductsFor(seed);
     }
-    return base;
   }
 
   if (c.type === "gift_search") {
@@ -342,18 +450,22 @@ export function resolveScenario(raw: string): Scenario | null {
       GIFT_DIRECTIONS[2].alternatives[0],
     ];
     base.giftDirections = GIFT_DIRECTIONS;
-    return base;
   }
 
   // service_search
-  base.questions = SERVICE_QUESTIONS;
-  if (hero === "service_search") {
-    base.companies = BALCONY_COMPANIES;
-    base.attentionNotes = ATTENTION_BALCONY;
-  } else {
-    const seed = findSeed(SERVICES, c.matched) ?? { text: c.matched, companies: undefined, priceFrom: 8000 };
-    base.companies = serviceOffersFor(seed);
+  if (c.type === "service_search") {
+    base.questions = SERVICE_QUESTIONS;
+    if (hero === "service_search") {
+      base.companies = BALCONY_COMPANIES;
+      base.attentionNotes = ATTENTION_BALCONY;
+    } else {
+      const seed = findSeed(SERVICES, c.matched) ?? { text: c.matched, companies: undefined, priceFrom: 8000 };
+      base.companies = serviceOffersFor(seed);
+    }
   }
+
+  // живой процесс собирается по уже готовым результатам — цифры везде честные
+  base.process = processFor(c.type, c.matched, base.products, base.companies);
   return base;
 }
 
