@@ -1,0 +1,236 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg2: var(--bg2);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-soft: var(--soft);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-pine: var(--pine);
+  --color-pine-fg: var(--pine-fg);
+  --color-pine-deep: var(--pine-deep);
+  --color-teal: var(--teal);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-warn: var(--warn);
+  --font-sans: "Golos Text", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Unbounded", "Golos Text", sans-serif;
+}
+
+:root {
+  --bg: #f3f6f4;
+  --bg2: #e8efeb;
+  --card: #fbfdfc;
+  --ink: #0f1f1a;
+  --soft: #476057;
+  --faint: #84998f;
+  --line: rgba(15, 31, 26, 0.11);
+  --pine: #0c6e58;
+  --pine-fg: #f2fbf7;
+  --pine-deep: #0a5646;
+  --teal: #0f8f7f;
+  --amber: #d98a1f;
+  --amber-soft: rgba(217, 138, 31, 0.14);
+  --warn: #a76410;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0a1210;
+  --bg2: #0d1815;
+  --card: #101d19;
+  --ink: #e9f3ee;
+  --soft: #9db4ab;
+  --faint: #648076;
+  --line: rgba(233, 243, 238, 0.11);
+  --pine: #34c79b;
+  --pine-fg: #062019;
+  --pine-deep: #7fe0c2;
+  --teal: #3fc4b0;
+  --amber: #f0b45c;
+  --amber-soft: rgba(240, 180, 92, 0.14);
+  --warn: #e5a04c;
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.35s ease, color 0.35s ease;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--pine) 28%, transparent);
+}
+
+/* ---------- фоновая среда ---------- */
+.aura-env {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.aura-env .halo {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(70px);
+  opacity: 0.55;
+}
+.dark .aura-env .halo {
+  opacity: 0.4;
+}
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+}
+
+/* ---------- ключевые движения ---------- */
+@keyframes aura-breathe {
+  0% { transform: scale(1) translateY(0); }
+  100% { transform: scale(1.05) translateY(-5px); }
+}
+@keyframes aura-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes aura-spin-rev {
+  to { transform: rotate(-360deg); }
+}
+@keyframes aura-float {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-7px); }
+}
+@keyframes aura-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pine) 45%, transparent); }
+  100% { box-shadow: 0 0 0 12px transparent; }
+}
+@keyframes aura-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.anim-breathe { animation: aura-breathe 5.5s ease-in-out infinite alternate; }
+.anim-float { animation: aura-float 4.5s ease-in-out infinite alternate; }
+.anim-spin-slow { animation: aura-spin 22s linear infinite; }
+.anim-spin-rev { animation: aura-spin-rev 30s linear infinite; }
+.event-pulse { animation: aura-pulse 1.4s ease-out 2; }
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--line) 55%, transparent) 25%,
+    color-mix(in srgb, var(--line) 20%, transparent) 40%,
+    color-mix(in srgb, var(--line) 55%, transparent) 60%
+  );
+  background-size: 800px 100%;
+  animation: aura-shimmer 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-breathe, .anim-float, .anim-spin-slow, .anim-spin-rev, .event-pulse, .shimmer {
+    animation: none !important;
+  }
+  html { scroll-behavior: auto; }
+}
+
+/* ---------- базовые компоненты ---------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+.glass {
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+}
+.label-caps {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 12px 20px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  user-select: none;
+}
+.btn:active { transform: scale(0.975); }
+.btn-primary {
+  background: var(--pine);
+  color: var(--pine-fg);
+  box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--pine) 65%, transparent);
+}
+.btn-primary:hover {
+  background: var(--pine-deep);
+  color: var(--pine-fg);
+  box-shadow: 0 12px 28px -10px color-mix(in srgb, var(--pine) 75%, transparent);
+  transform: translateY(-1px);
+}
+.dark .btn-primary:hover { color: #062019; }
+.btn-ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+}
+.btn-ghost:hover {
+  background: color-mix(in srgb, var(--line) 40%, transparent);
+  border-color: color-mix(in srgb, var(--line) 160%, transparent);
+  transform: translateY(-1px);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.chip:hover {
+  border-color: color-mix(in srgb, var(--pine) 55%, var(--line));
+  background: color-mix(in srgb, var(--pine) 9%, var(--card));
+  transform: translateY(-1px);
+}
+.chip-on {
+  border-color: color-mix(in srgb, var(--pine) 65%, transparent);
+  background: color-mix(in srgb, var(--pine) 13%, var(--card));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pine) 12%, transparent);
+}
+.line-mask { overflow: hidden; display: block; }
+.line-mask > span { display: block; }
+
+/* тонкий скролл для таблиц */
+.nice-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+.nice-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--faint) 45%, transparent);
+  border-radius: 999px;
+}
+.nice-scroll::-webkit-scrollbar-track { background: transparent; }
